@@ -41,7 +41,7 @@ public:
 bool getImageInfo(image* targetImage);// Used for get the useful data in tiff image, and return false when the filename of the target image is invalid.
 float* phaseRetrieval(image* calibImage, image* testImage);
 void fourierFilterForCalib(image* calibImage);
-int2 findRightMaxPoint(float* input); 
+int2 findMaxPoint(float* input); 
 void imageFileWrite(float* input, char* filename);
 void complexWrite(const char* title, float2* input, int width, const char* filename);
 void realWrite(const char* title, float* input, int width, const char* filename);
@@ -88,7 +88,7 @@ __global__ void createFilter( int padding,  int2 maxPoint, float* imageFilter, i
 	int y = threadIdx.y;
 	int i = blockIdx.x + threadIdx.y * gridDim.x;
 	if (i < numElements) {
-		if (maxPoint.x * maxPoint.x + maxPoint.y *maxPoint.y <= padding)
+		if ((maxPoint.x * maxPoint.x + maxPoint.y *maxPoint.y) <= padding * padding )
 			imageFilter[i] = 1;
 		else
 			imageFilter[i] = 0;
@@ -138,11 +138,11 @@ __global__ void circShift2D( cufftComplex* input,  int2 maxPoint, cufftComplex* 
 	int y = threadIdx.y;
 	int i = blockIdx.x + threadIdx.y * gridDim.x;
 	int preX = x - 640 + maxPoint.x;
-	int preY = y - 480 + maxPoint.y;
+	int preY = x - 480 + maxPoint.y;
 	if (i < numElements) {
-		if (preY < 0)
-			preY = 960 - preY;
-		if (preX < 0 || preX > 640) {
+		if (preX < 0)
+			preX = 1280 + preX;
+		if (preY < 0 || preY > 480) {
 			output[x + gridDim.x + y].x = 0;
 			output[x + gridDim.x + y].y = 0;
 		}
@@ -250,12 +250,14 @@ bool getImageInfo( image* targetImage ) {
 	return true;
 }
 
-int2 findRightMaxPoint(float* input) {
+int2 findMaxPoint(float* input) {
 	int2 tempPoint = {0,0};
 	float tempMax = 0;
-	for (int i = 100; i < 860; i++) {
-		for (int j = 100; j < 641; j++) {
-			if (input[i * 640 + j] > tempMax) {
+	for (int i = 0; i < 641; i++) {
+		for (int j = 0; j < 1280; j++) {
+			if (j > 600 && j < 680)
+				continue;
+			if (input[i * 1280 + j] > tempMax) {
 				tempMax = input[i * 640 + j];
 				tempPoint.y = i;
 				tempPoint.x = j;
@@ -267,8 +269,8 @@ int2 findRightMaxPoint(float* input) {
 
 void fourierFilterForCalib(image* calibImage) {
 	cout << "Part: fourier filter for calib image" << endl;
-	int imageSizeS = 641 * 960;
-	dim3 blockSize(1, 960, 1), gridSizeL(1280, 1, 1), gridSizeS(641, 1, 1);
+	int imageSizeS = 1280 * 481;
+	dim3 blockSizeL(1, 960, 1), gridSize(1280, 1, 1), blockSizeS(1, 481, 1);
 
 	float* calibAbsImage = (float*)malloc(sizeof(float) * imageSizeS);
 
@@ -301,31 +303,32 @@ void fourierFilterForCalib(image* calibImage) {
 		cout << "cuda memory cpy error!" << endl;
 
 	errorHandle(cufftExecR2C(FFT, dev_calibImage, dev_calibFFT));
-	FFTShift2D <<< gridSizeS, blockSize >>> (dev_calibFFT, dev_calibFFTShifted, imageSizeS);
+	FFTShift2D <<< gridSize, blockSizeS >>> (dev_calibFFT, dev_calibFFTShifted, imageSizeS);
 	if (cudaSuccess != cudaGetLastError())
 		printf("FFTShift error!\n");
 	
-	getAbsOfComplexMatric <<< gridSizeS, blockSize >>> (dev_calibFFTShifted, dev_calibABSFFTShifted, imageSizeS);
+	getAbsOfComplexMatric <<< gridSize, blockSizeS >>> (dev_calibFFTShifted, dev_calibABSFFTShifted, imageSizeS);
 	if (cudaSuccess != cudaGetLastError())
 		printf("get abs error!\n");
 	cudaThreadSynchronize();
 
-	if (cudaSuccess != cudaMemcpy(calibAbsImage, dev_calibABSFFTShifted, (calibImage->imagePixels / 2 + 960) * sizeof(float), cudaMemcpyDeviceToHost))
+	if (cudaSuccess != cudaMemcpy(calibAbsImage, dev_calibABSFFTShifted, imageSizeS * sizeof(float), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error!" << endl;
 
 	realWrite("calib abs image", calibAbsImage, 640, "..\ouput_text\calib_abs_image.txt");
 
-	calibImage->fftMaxPosition = findRightMaxPoint(calibAbsImage);
-	createFilter <<<gridSizeS, blockSize >>> (80, calibImage->fftMaxPosition, dev_calibImageFilter, imageSizeS);
+	calibImage->fftMaxPosition = findMaxPoint(calibAbsImage);
+
+	createFilter <<<gridSize, blockSizeS >>> (80, calibImage->fftMaxPosition, dev_calibImageFilter, imageSizeS);
 	if (cudaSuccess != cudaGetLastError())
 		printf("filter create error!\n");
-	numMultipleForComplex <<<gridSizeS, blockSize >>> (dev_calibFFT, dev_calibImageFilter, dev_filteredCalibFFT, imageSizeS);
+	numMultipleForComplex <<<gridSize, blockSizeS >>> (dev_calibFFT, dev_calibImageFilter, dev_filteredCalibFFT, imageSizeS);
 	if (cudaSuccess != cudaGetLastError())
 		printf("matrix num multiple error!\n");
-	circShift2D <<<gridSizeL, blockSize >>> (dev_filteredCalibFFT, calibImage->fftMaxPosition, dev_filterCircCalibFFT, imageSizeS);
+	circShift2D <<<gridSize, blockSizeL >>> (dev_filteredCalibFFT, calibImage->fftMaxPosition, dev_filterCircCalibFFT, imageSizeS);
 	if (cudaSuccess != cudaGetLastError())
 		printf("circle shift error!\n");
-	IFFTShift2D <<<gridSizeL, blockSize >>> (dev_filterCircCalibFFT, dev_filteredCalibFFT, imageSizeS);
+	IFFTShift2D <<<gridSize, blockSizeL >>> (dev_filterCircCalibFFT, dev_filteredCalibFFT, imageSizeS);
 	if (cudaSuccess != cudaGetLastError())
 		printf("IFFT shift error!\n");
 	cufftExecC2C(IFFT, dev_filteredCalibFFT, dev_calibFilteredBaseband,CUFFT_INVERSE);
@@ -357,8 +360,8 @@ void fourierFilterForCalib(image* calibImage) {
 
 float* phaseRetrieval(image* calibImage, image* testImage) {
 	cout << "Part: phase retrieval" << endl;
-	int imageSizeS = 641 * 960;
-	dim3 blockSize(1, 960, 1), gridSizeL(1280, 1, 1), gridSizeS(641, 1, 1);
+	int imageSizeS = 1280 * 481;
+	dim3 blockSizeL(1, 960, 1), gridSizeL(1280, 1, 1), blockSizeS(1, 641, 1);
 
 	float* testAbsImage = (float*)malloc(sizeof(float) * imageSizeS);
 
@@ -390,10 +393,10 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 		cout << "cuda memory cpy error!" << endl;
 	//
 	errorHandle(cufftExecR2C(FFT, dev_testImage, dev_testFFT));
-	FFTShift2D <<< gridSizeS, blockSize >>> (dev_testFFT, dev_testFFTShifted, imageSizeS);
+	FFTShift2D <<< gridSize, blockSizeS >>> (dev_testFFT, dev_testFFTShifted, imageSizeS);
 	if (cudaSuccess != cudaGetLastError())
 		printf("FFT shift Error!\n");
-	getAbsOfComplexMatric <<< gridSizeS, blockSize >>> (dev_testFFTShifted, dev_testABSFFTShifted, imageSizeS);
+	getAbsOfComplexMatric <<< gridSize, blockSizeS >>> (dev_testFFTShifted, dev_testABSFFTShifted, imageSizeS);
 	if (cudaSuccess != cudaGetLastError())
 		printf("ABS Error!\n");
 	cudaThreadSynchronize();
@@ -403,17 +406,17 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 
 	realWrite("test abs image", testAbsImage, 640, "..\ouput_text\test_abs_image.txt");
 
-	testImage->fftMaxPosition = findRightMaxPoint(testAbsImage);
-	createFilter <<<gridSizeS, blockSize >>> (80, testImage->fftMaxPosition, dev_testImageFilter, imageSizeS);
+	testImage->fftMaxPosition = findMaxPoint(testAbsImage);
+	createFilter <<<gridSize, blockSizeS >>> (80, testImage->fftMaxPosition, dev_testImageFilter, imageSizeS);
 	if (cudaSuccess != cudaGetLastError())
 		printf("filter create Error!\n");
-	numMultipleForComplex <<<gridSizeS, blockSize >>> (dev_testFFT, dev_testImageFilter, dev_filteredTestFFT, imageSizeS);
+	numMultipleForComplex <<<gridSize, blockSizeS >>> (dev_testFFT, dev_testImageFilter, dev_filteredTestFFT, imageSizeS);
 	if (cudaSuccess != cudaGetLastError())
 		printf("multiple Error!\n");
-	circShift2D <<<gridSizeL, blockSize >>> (dev_filteredTestFFT, testImage->fftMaxPosition, dev_filterCircTestFFT, imageSizeS);
+	circShift2D <<<gridSize, blockSizeL >>> (dev_filteredTestFFT, testImage->fftMaxPosition, dev_filterCircTestFFT, imageSizeS);
 	if (cudaSuccess != cudaGetLastError())
 		printf("circ shift Error!\n");
-	IFFTShift2D <<<gridSizeL, blockSize >>> (dev_filterCircTestFFT, dev_filteredTestFFT, imageSizeS);
+	IFFTShift2D <<<gridSize, blockSizeL >>> (dev_filterCircTestFFT, dev_filteredTestFFT, imageSizeS);
 	if (cudaSuccess != cudaGetLastError())
 		printf("IFFT shift Error!\n");
 	errorHandle(cufftExecC2C(IFFT, dev_filteredTestFFT, dev_testFilteredBaseband,CUFFT_INVERSE));
@@ -449,10 +452,10 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 	if (cudaSuccess != cudaMemcpy(dev_calibFilteredBaseband, calibImage->filteredBaseband, testImage->imagePixels * sizeof(float2), cudaMemcpyHostToDevice))
 		cout << "cuda memory cpy error!" << endl;
 
-	vectorNumdivide <<<gridSizeL,blockSize>>> (dev_testFilteredBaseband, dev_calibFilteredBaseband, dev_finalImage, calibImage->imagePixels) ;
+	vectorNumdivide <<<gridSize,blockSizeL>>> (dev_testFilteredBaseband, dev_calibFilteredBaseband, dev_finalImage, calibImage->imagePixels) ;
 	if (cudaSuccess != cudaGetLastError())
 		printf("divide Error!\n");
-	phaseCalculate <<<gridSizeL, blockSize >>> (dev_finalImage, dev_phaseImage, calibImage->imagePixels);
+	phaseCalculate <<<gridSize, blockSizeL >>> (dev_finalImage, dev_phaseImage, calibImage->imagePixels);
 	if (cudaSuccess != cudaGetLastError())
 		printf("phase calculate Error!\n");
 	if (cudaSuccess != cudaMemcpy(phaseImage, dev_phaseImage, testImage->imagePixels * sizeof(float), cudaMemcpyDeviceToHost))
@@ -496,7 +499,7 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 	if (cudaSuccess != cudaGetLastError())
 		printf("xConf vec create Error!\n");
 
-	forPhaseImage<<<gridSizeL,blockSize>>>(mean2, dev_xConfVec, dev_phaseImage, testImage->imagePixels);
+	forPhaseImage<<<gridSize,blockSizeL>>>(mean2, dev_xConfVec, dev_phaseImage, testImage->imagePixels);
 	cudaFree(dev_xConfVec);
 	cudaThreadSynchronize();
 	if (cudaSuccess != cudaMemcpy(phaseImage, dev_phaseImage, testImage->imagePixels * sizeof(float), cudaMemcpyDeviceToHost))
@@ -505,7 +508,7 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 	float* height1 = (float*)malloc(sizeof(float) * testImage->imagePixels);
 	cufftReal* dev_height;
 	cudaMalloc((void**)& dev_height, sizeof(float) * testImage->imagePixels);
-	calHeight <<<gridSizeL, blockSize >>> (dev_phaseImage,mean2,dev_height,testImage->imagePixels);
+	calHeight <<<gridSize, blockSizeL >>> (dev_phaseImage,mean2,dev_height,testImage->imagePixels);
 	if (cudaSuccess != cudaGetLastError())
 		printf("cal height Error!\n");
 	cudaThreadSynchronize();
@@ -516,7 +519,7 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 	float* dev_output;
 	if (cudaSuccess != cudaMalloc((void**)& dev_output, sizeof(float)* testImage->imagePixels))
 		cout << "cuda malloc error!" << endl;
-	calOutputImage<<<gridSizeL, blockSize >>>(dev_height, dev_output, testImage->imagePixels);
+	calOutputImage<<<gridSize, blockSizeL >>>(dev_height, dev_output, testImage->imagePixels);
 	if (cudaSuccess != cudaGetLastError())
 		printf("output image create Error!\n");
 	cudaThreadSynchronize();
