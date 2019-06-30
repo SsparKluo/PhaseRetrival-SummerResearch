@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.29009.5
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Phase Retrieval", "Phase Retrieval\Phase Retrieval.vcxproj", "{EDD2967B-8D7A-4D52-BEEE-822481FA4483}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Debug|x86 = Debug|x86
+		Release|x64 = Release|x64
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{EDD2967B-8D7A-4D52-BEEE-822481FA4483}.Debug|x64.ActiveCfg = Debug|x64
+		{EDD2967B-8D7A-4D52-BEEE-822481FA4483}.Debug|x64.Build.0 = Debug|x64
+		{EDD2967B-8D7A-4D52-BEEE-822481FA4483}.Debug|x86.ActiveCfg = Debug|Win32
+		{EDD2967B-8D7A-4D52-BEEE-822481FA4483}.Debug|x86.Build.0 = Debug|Win32
+		{EDD2967B-8D7A-4D52-BEEE-822481FA4483}.Release|x64.ActiveCfg = Release|x64
+		{EDD2967B-8D7A-4D52-BEEE-822481FA4483}.Release|x64.Build.0 = Release|x64
+		{EDD2967B-8D7A-4D52-BEEE-822481FA4483}.Release|x86.ActiveCfg = Release|Win32
+		{EDD2967B-8D7A-4D52-BEEE-822481FA4483}.Release|x86.Build.0 = Release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {E4344ABB-8356-4BD8-A53F-4E8E1E27BA0D}
+	EndGlobalSection
+EndGlobal
