@@ -273,6 +273,7 @@ void fourierFilterForCalib(image* calibImage) {
 	dim3 blockSizeL(1, 960, 1), gridSize(1280, 1, 1), blockSizeS(1, 481, 1);
 
 	float* calibAbsImage = (float*)malloc(sizeof(float) * imageSizeS);
+	cout << &calibAbsImage << endl;
 
 	cufftReal* dev_calibImage, * dev_calibABSFFTShifted, * dev_calibImageFilter;
 	cufftComplex* dev_calibFFT, * dev_calibFFTShifted, * dev_filteredCalibFFT, * dev_filterCircCalibFFT, * dev_calibFilteredBaseband;
@@ -298,7 +299,7 @@ void fourierFilterForCalib(image* calibImage) {
 	errorHandle(cufftPlan2d(&FFT, 1280, 960, CUFFT_R2C));
 	errorHandle(cufftPlan2d(&IFFT, 1280, 960, CUFFT_C2C));
 
-	cout << calibImage->imagePixels << endl;
+
 	if (cudaSuccess != cudaMemcpy(dev_calibImage, calibImage->imageData, calibImage->imagePixels * sizeof(cufftReal), cudaMemcpyHostToDevice))
 		cout << "cuda memory cpy error!" << endl;
 
@@ -312,8 +313,10 @@ void fourierFilterForCalib(image* calibImage) {
 		printf("get abs error!\n");
 	cudaThreadSynchronize();
 
-	if (cudaSuccess != cudaMemcpy(calibAbsImage, dev_calibABSFFTShifted, imageSizeS * sizeof(float), cudaMemcpyDeviceToHost))
+	int a = cudaMemcpy(calibAbsImage, dev_calibABSFFTShifted, imageSizeS * sizeof(cufftReal), cudaMemcpyDeviceToHost);
+	if (cudaSuccess != a)
 		cout << "cuda memory cpy error!" << endl;
+	cout << a << endl;
 
 	realWrite("calib abs image", calibAbsImage, 640, "..\ouput_text\calib_abs_image.txt");
 
@@ -361,7 +364,7 @@ void fourierFilterForCalib(image* calibImage) {
 float* phaseRetrieval(image* calibImage, image* testImage) {
 	cout << "Part: phase retrieval" << endl;
 	int imageSizeS = 1280 * 481;
-	dim3 blockSizeL(1, 960, 1), gridSizeL(1280, 1, 1), blockSizeS(1, 641, 1);
+	dim3 blockSizeL(1, 960, 1), gridSize(1280, 1, 1), blockSizeS(1, 641, 1);
 
 	float* testAbsImage = (float*)malloc(sizeof(float) * imageSizeS);
 
