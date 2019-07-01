@@ -109,15 +109,15 @@ __global__ void FFTShift2D( cufftComplex* input, cufftComplex* output, int numEl
 	int x = blockIdx.x;
 	int y = threadIdx.y;
 	int i = blockIdx.x * blockDim.y + threadIdx.y;
-	int half = gridDim.x / 2;
+	int half = 640;
 	if (i < numElements ) {
-		if (y >= half / 2) {
-			output[(y - half) * gridDim.x + x].x = input[y * gridDim.x + x].x;
-			output[(y - half) * gridDim.x + x].y = input[y * gridDim.x + x].y;
+		if (x >= half ) {
+			output[y + (x - half) * blockDim.y].x = input[y + x * blockDim.y].x;
+			output[y + (x - half) * blockDim.y].y = input[y + x * blockDim.y].y;
 		}
 		else {
-			output[(y + half) * gridDim.x + x].x = input[y * gridDim.x + x].x;
-			output[(y + half) * gridDim.x + x].y = input[y * gridDim.x + x].y;
+			output[y + (x + half) * blockDim.y].x = input[y + x * blockDim.y].x;
+			output[y + (x + half) * blockDim.y].y = input[y + x * blockDim.y].y;
 		}
 	}
 }
@@ -238,13 +238,13 @@ bool getImageInfo( image* targetImage ) {
 		}
 		float tempMax = 0;
 		float tempMin = 10000;
-		for (int i = 0; i < targetImage->height; i++) {
-			for (int j = 0; j < targetImage->width; j++) {
+		for (int i = 0; i < targetImage->width; i++) {
+			for (int j = 0; j < targetImage->height; j++) {
 				targetImage->imageData[i*targetImage->height + j] = ((float)targetImage->rawImage[j][i] / 256);
-				if (tempMax < targetImage->imageData[i * targetImage->width + j]) 
-					tempMax = targetImage->imageData[i * targetImage->width + j];
-				if (tempMin > targetImage->imageData[i * targetImage->width + j])
-					tempMin = targetImage->imageData[i * targetImage->width + j];
+				//if (tempMax < targetImage->imageData[i * targetImage->width + j]) 
+					//tempMax = targetImage->imageData[i * targetImage->width + j];
+				//if (tempMin > targetImage->imageData[i * targetImage->width + j])
+					//tempMin = targetImage->imageData[i * targetImage->width + j];
 			}
 		}
 		targetImage->maxIntensity = tempMax;
@@ -284,7 +284,7 @@ void fourierFilterForCalib(image* calibImage) {
 
 	float* calibAbsImage = new float[imageSizeS];
 
-	realWrite("input for fourierFiltered", calibImage->imageData, 1280, "../Debug/input_FF.txt");
+	//realWrite("input for fourierFiltered", calibImage->imageData, 1280, "../Debug/input_FF.txt");
 
 	cufftReal* dev_calibImage, * dev_calibABSFFTShifted, * dev_calibImageFilter;
 	cufftComplex* dev_calibFFT, * dev_calibFFTShifted, * dev_filteredCalibFFT, * dev_filterCircCalibFFT, * dev_calibFilteredBaseband;
@@ -316,12 +316,13 @@ void fourierFilterForCalib(image* calibImage) {
 		cout << "cuda memory cpy error!" << endl;
 
 	errorHandle(cufftExecR2C(FFT, dev_calibImage, dev_calibFFT));
+	cudaDeviceSynchronize();
 	float2* tempOut = (float2*)malloc(sizeof(float2) * 1280 * 481);
-	int a = cudaMemcpy((void*)tempOut, (void*)dev_calibFFT, imageSizeS * sizeof(cufftReal), cudaMemcpyDeviceToHost);
+	int a = cudaMemcpy((void*)tempOut, (void*)dev_calibFFT, imageSizeS * sizeof(cufftComplex), cudaMemcpyDeviceToHost);
 	if (cudaSuccess != a)
 		cout << "cuda memory cpy error!" << endl;
 	cout << a << endl;
-	complexWrite("temp dubug info", tempOut, 1280, "../Debug/tempout.txt");
+//	complexWrite("temp dubug info", tempOut, 1280, "../Debug/tempout.txt");
 
 	FFTShift2D <<< gridSize, blockSizeS >>> (dev_calibFFT, dev_calibFFTShifted, imageSizeS);
 	if (cudaSuccess != cudaGetLastError())
@@ -421,7 +422,7 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 	getAbsOfComplexMatric <<< gridSize, blockSizeS >>> (dev_testFFTShifted, dev_testABSFFTShifted, imageSizeS);
 	if (cudaSuccess != cudaGetLastError())
 		printf("ABS Error!\n");
-	cudaThreadSynchronize();
+	cudaDeviceSynchronize();
 
 	if (cudaSuccess != cudaMemcpy(testAbsImage, dev_testABSFFTShifted, (testImage->imagePixels / 2 + 960) * sizeof(float), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error!" << endl;
