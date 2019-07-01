@@ -309,8 +309,8 @@ void fourierFilterForCalib(image* calibImage) {
 
 	cufftHandle FFT;
 	cufftHandle IFFT;
-	errorHandle(cufftPlan2d(&FFT, 1280, 960, CUFFT_R2C));
-	errorHandle(cufftPlan2d(&IFFT, 1280, 960, CUFFT_C2C));
+	errorHandle(cufftPlan2d(&FFT, 1280, 960, CUFFT_D2Z));
+	errorHandle(cufftPlan2d(&IFFT, 1280, 960, CUFFT_Z2Z));
 
 	if (cudaSuccess != cudaMemcpy(dev_calibImage, calibImage->imageData, calibImage->imagePixels * sizeof(cufftDoubleReal), cudaMemcpyHostToDevice))
 		cout << "cuda memory cpy error!" << endl;
@@ -408,9 +408,9 @@ double* phaseRetrieval(image* calibImage, image* testImage) {
 		cout << "cuda malloc error!" << endl;
 
 	cufftHandle FFT;
-	errorHandle(cufftPlan2d(&FFT, 1280, 960, CUFFT_R2C));
+	errorHandle(cufftPlan2d(&FFT, 1280, 960, CUFFT_D2Z));
 	cufftHandle IFFT;
-	errorHandle(cufftPlan2d(&IFFT, 1280, 960, CUFFT_C2C));
+	errorHandle(cufftPlan2d(&IFFT, 1280, 960, CUFFT_Z2Z));
 
 	if (cudaSuccess != cudaMemcpy(dev_testImage, testImage->imageData, testImage->imagePixels * sizeof(double), cudaMemcpyHostToDevice))
 		cout << "cuda memory cpy error!" << endl;
@@ -446,7 +446,7 @@ double* phaseRetrieval(image* calibImage, image* testImage) {
 	cudaThreadSynchronize();
 	cudaMemcpy(testImage->filteredBaseband, dev_testFilteredBaseband, (testImage->imagePixels) * sizeof(double), cudaMemcpyDeviceToHost);
 
-	complexWrite("test filtered baseband", testImage->filteredBaseband, 1280, "../Debug/test_filtered_baseband.txt");
+	complexWrite("test filtered baseband", testImage->filteredBaseband, 960, "../Debug/test_filtered_baseband.txt");
 
 	if (cudaSuccess != cudaFree(dev_testImage))
 		cout << "cude meomory free error!" << endl;
@@ -483,7 +483,7 @@ double* phaseRetrieval(image* calibImage, image* testImage) {
 		printf("phase calculate Error!\n");
 	if (cudaSuccess != cudaMemcpy(phaseImage, dev_phaseImage, testImage->imagePixels * sizeof(double), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error!" << endl;
-	realWrite("phase image", phaseImage, 1280, "..\ouput_text\phase_image1.txt");
+	realWrite("phase image", phaseImage, 960, "..\ouput_text\phase_image1.txt");
 	/*
 	if (!myUnwrapInitialize()) {
 		cout << "matlab unwrap function initialize error" << endl;
