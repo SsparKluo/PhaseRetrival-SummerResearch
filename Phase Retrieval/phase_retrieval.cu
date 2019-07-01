@@ -49,18 +49,24 @@ void errorHandle(int input);
 
 
 __global__ void vectorAdd( float* a,  float* b, float* c, int numElements) {
+	int x = blockIdx.x;
+	int y = threadIdx.y;
 	int i = blockIdx.x + threadIdx.y * gridDim.x;
 	if (i < numElements)
 		c[i] = a[i] + b[i];
 }
 
 __global__ void vectorNumMultiple( float* a,  float* b, float* c, int numElements) {
+	int x = blockIdx.x;
+	int y = threadIdx.y;
 	int i = blockIdx.x + threadIdx.y * gridDim.x;
 	if (i < numElements)
 		c[i] = a[i] * b[i];
 }
 
 __global__ void numMultipleForComplex( float2* a,  float* b, float2* c, int numElements) {
+	int x = blockIdx.x;
+	int y = threadIdx.y;
 	int i = blockIdx.x + threadIdx.y * gridDim.x;
 	if (i < numElements) {
 		c[i].x = a[i].x * b[i];
@@ -69,6 +75,8 @@ __global__ void numMultipleForComplex( float2* a,  float* b, float2* c, int numE
 }
 
 __global__ void vectorNumdivide( float2* dividend,  float2* divisor, float2* output, int numElements) {
+	int x = blockIdx.x;
+	int y = threadIdx.y;
 	int i = blockIdx.x + threadIdx.y * gridDim.x;
 	if (i < numElements) {
 		output[i].x = dividend[i].x / divisor[i].x;
@@ -78,6 +86,8 @@ __global__ void vectorNumdivide( float2* dividend,  float2* divisor, float2* out
 }
 
 __global__ void getAbsOfComplexMatric( cufftComplex* input, cufftReal* output, int numElements) {
+	int x = blockIdx.x;
+	int y = threadIdx.y;
 	int i = blockIdx.x + threadIdx.y * gridDim.x;
 	if (i < numElements)
 		output[i] = sqrt(input[i].x * input[i].x + input[i].y * input[i].y);
@@ -99,8 +109,8 @@ __global__ void FFTShift2D( cufftComplex* input, cufftComplex* output, int numEl
 	int x = blockIdx.x;
 	int y = threadIdx.y;
 	int i = blockIdx.x + threadIdx.y * gridDim.x;
-	int half = blockDim.y / 2;
-	if (i < numElements) {
+	int half = gridDim.x / 2;
+	if (i < numElements ) {
 		if (y >= half / 2) {
 			output[(y - half) * gridDim.x + x].x = input[y * gridDim.x + x].x;
 			output[(y - half) * gridDim.x + x].y = input[y * gridDim.x + x].y;
@@ -272,13 +282,17 @@ void fourierFilterForCalib(image* calibImage) {
 	int imageSizeS = 1280 * 481;
 	dim3 blockSizeL(1, 960, 1), gridSize(1280, 1, 1), blockSizeS(1, 481, 1);
 
-	float* calibAbsImage = (float*)malloc(sizeof(float) * imageSizeS);
+	float* calibAbsImage = new float[imageSizeS];
 	cout << &calibAbsImage << endl;
+
+	realWrite("input for fourierFiltered", calibImage->imageData, 1280, "../Debug/input_FF.txt");
 
 	cufftReal* dev_calibImage, * dev_calibABSFFTShifted, * dev_calibImageFilter;
 	cufftComplex* dev_calibFFT, * dev_calibFFTShifted, * dev_filteredCalibFFT, * dev_filterCircCalibFFT, * dev_calibFilteredBaseband;
-	if (cudaSuccess != cudaMalloc((void**)& dev_calibImage, sizeof(float) * calibImage->imagePixels))
+	int n = cudaMalloc((void**)& dev_calibImage, sizeof(float) * calibImage->imagePixels);
+	if (cudaSuccess != n)
 		cout << "cuda malloc error1!" << endl;
+	cout << n << endl;
 	if (cudaSuccess != cudaMalloc((void**)& dev_calibFilteredBaseband, sizeof(float2) * calibImage->imagePixels))
 		cout << "cuda malloc error2!" << endl;
 	if (cudaSuccess != cudaMalloc((void**)& dev_calibImageFilter, sizeof(float) * imageSizeS))
@@ -299,11 +313,17 @@ void fourierFilterForCalib(image* calibImage) {
 	errorHandle(cufftPlan2d(&FFT, 1280, 960, CUFFT_R2C));
 	errorHandle(cufftPlan2d(&IFFT, 1280, 960, CUFFT_C2C));
 
-
 	if (cudaSuccess != cudaMemcpy(dev_calibImage, calibImage->imageData, calibImage->imagePixels * sizeof(cufftReal), cudaMemcpyHostToDevice))
 		cout << "cuda memory cpy error!" << endl;
 
 	errorHandle(cufftExecR2C(FFT, dev_calibImage, dev_calibFFT));
+	float2* tempOut = (float2*)malloc(sizeof(float2) * 1280 * 481);
+	int a = cudaMemcpy((void*)tempOut, (void*)dev_calibFFT, imageSizeS * sizeof(cufftReal), cudaMemcpyDeviceToHost);
+	if (cudaSuccess != a)
+		cout << "cuda memory cpy error!" << endl;
+	cout << a << endl;
+	complexWrite("temp dubug info", tempOut, 1280, "../Debug/tempout.txt");
+
 	FFTShift2D <<< gridSize, blockSizeS >>> (dev_calibFFT, dev_calibFFTShifted, imageSizeS);
 	if (cudaSuccess != cudaGetLastError())
 		printf("FFTShift error!\n");
@@ -311,12 +331,12 @@ void fourierFilterForCalib(image* calibImage) {
 	getAbsOfComplexMatric <<< gridSize, blockSizeS >>> (dev_calibFFTShifted, dev_calibABSFFTShifted, imageSizeS);
 	if (cudaSuccess != cudaGetLastError())
 		printf("get abs error!\n");
-	cudaThreadSynchronize();
 
-	int a = cudaMemcpy(calibAbsImage, dev_calibABSFFTShifted, imageSizeS * sizeof(cufftReal), cudaMemcpyDeviceToHost);
-	if (cudaSuccess != a)
+
+	int b = cudaMemcpy((void*)calibAbsImage, (void*)dev_calibABSFFTShifted, imageSizeS * sizeof(cufftReal), cudaMemcpyDeviceToHost);
+	if (cudaSuccess != b)
 		cout << "cuda memory cpy error!" << endl;
-	cout << a << endl;
+	cout << b << endl;
 
 	realWrite("calib abs image", calibAbsImage, 640, "..\ouput_text\calib_abs_image.txt");
 
@@ -571,6 +591,7 @@ void realWrite(const char* title, float* input , int width, const char* filename
 		outFile << "line " << y << ": ";
 		for (int x = 0; x < width; x++) {
 			outFile << input[sum] << " | ";
+			sum++;
 		}
 		outFile << endl;
 	}
@@ -592,6 +613,7 @@ void complexWrite(const char* title, float2* input, int width, const char* filen
 		outFile << "line " << y << ": ";
 		for (int x = 0; x < width; x++) {
 			outFile << input[sum].x << "|" << input[sum].y << "i" << " | ";
+			sum++;
 		}
 		outFile << endl;
 	}
