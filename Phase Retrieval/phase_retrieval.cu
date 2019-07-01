@@ -51,7 +51,7 @@ void errorHandle(int input);
 __global__ void vectorAdd( float* a,  float* b, float* c, int numElements) {
 	int x = blockIdx.x;
 	int y = threadIdx.y;
-	int i = blockIdx.x + threadIdx.y * gridDim.x;
+	int i = blockIdx.x * blockDim.y + threadIdx.y;
 	if (i < numElements)
 		c[i] = a[i] + b[i];
 }
@@ -59,7 +59,7 @@ __global__ void vectorAdd( float* a,  float* b, float* c, int numElements) {
 __global__ void vectorNumMultiple( float* a,  float* b, float* c, int numElements) {
 	int x = blockIdx.x;
 	int y = threadIdx.y;
-	int i = blockIdx.x + threadIdx.y * gridDim.x;
+	int i = blockIdx.x * blockDim.y + threadIdx.y;
 	if (i < numElements)
 		c[i] = a[i] * b[i];
 }
@@ -77,7 +77,7 @@ __global__ void numMultipleForComplex( float2* a,  float* b, float2* c, int numE
 __global__ void vectorNumdivide( float2* dividend,  float2* divisor, float2* output, int numElements) {
 	int x = blockIdx.x;
 	int y = threadIdx.y;
-	int i = blockIdx.x + threadIdx.y * gridDim.x;
+	int i = blockIdx.x * blockDim.y + threadIdx.y;
 	if (i < numElements) {
 		output[i].x = dividend[i].x / divisor[i].x;
 		output[i].y = dividend[i].y / divisor[i].y;
@@ -88,7 +88,7 @@ __global__ void vectorNumdivide( float2* dividend,  float2* divisor, float2* out
 __global__ void getAbsOfComplexMatric( cufftComplex* input, cufftReal* output, int numElements) {
 	int x = blockIdx.x;
 	int y = threadIdx.y;
-	int i = blockIdx.x + threadIdx.y * gridDim.x;
+	int i = blockIdx.x * blockDim.y + threadIdx.y;
 	if (i < numElements)
 		output[i] = sqrt(input[i].x * input[i].x + input[i].y * input[i].y);
 }
@@ -96,7 +96,7 @@ __global__ void getAbsOfComplexMatric( cufftComplex* input, cufftReal* output, i
 __global__ void createFilter( int padding,  int2 maxPoint, float* imageFilter, int numElements) {
 	int x = blockIdx.x;
 	int y = threadIdx.y;
-	int i = blockIdx.x + threadIdx.y * gridDim.x;
+	int i = blockIdx.x * blockDim.y + threadIdx.y;
 	if (i < numElements) {
 		if ((maxPoint.x * maxPoint.x + maxPoint.y *maxPoint.y) <= padding * padding )
 			imageFilter[i] = 1;
@@ -108,7 +108,7 @@ __global__ void createFilter( int padding,  int2 maxPoint, float* imageFilter, i
 __global__ void FFTShift2D( cufftComplex* input, cufftComplex* output, int numElements) {
 	int x = blockIdx.x;
 	int y = threadIdx.y;
-	int i = blockIdx.x + threadIdx.y * gridDim.x;
+	int i = blockIdx.x * blockDim.y + threadIdx.y;
 	int half = gridDim.x / 2;
 	if (i < numElements ) {
 		if (y >= half / 2) {
@@ -125,7 +125,7 @@ __global__ void FFTShift2D( cufftComplex* input, cufftComplex* output, int numEl
 __global__ void IFFTShift2D( cufftComplex* input, cufftComplex* output, int numElements) {
 	int x = blockIdx.x;
 	int y = threadIdx.y;
-	int i = blockIdx.x + threadIdx.y * gridDim.x;
+	int i = blockIdx.x * blockDim.y + threadIdx.y;
 	int halfY = blockDim.y / 2;
 	int halfX = gridDim.x / 2;
 	int preX, preY;
@@ -146,7 +146,7 @@ __global__ void IFFTShift2D( cufftComplex* input, cufftComplex* output, int numE
 __global__ void circShift2D( cufftComplex* input,  int2 maxPoint, cufftComplex* output, int numElements) {
 	int x = blockIdx.x;
 	int y = threadIdx.y;
-	int i = blockIdx.x + threadIdx.y * gridDim.x;
+	int i = blockIdx.x * blockDim.y + threadIdx.y;
 	int preX = x - 640 + maxPoint.x;
 	int preY = x - 480 + maxPoint.y;
 	if (i < numElements) {
@@ -165,7 +165,7 @@ __global__ void circShift2D( cufftComplex* input,  int2 maxPoint, cufftComplex* 
 
 __global__ void phaseCalculate( cufftComplex* input, cufftReal* output, int numElements) {
 
-	int i = blockIdx.x + threadIdx.y * gridDim.x;
+	int i = blockIdx.x * blockDim.y + threadIdx.y;
 	if (i < numElements) {
 		output[i] = atan2(input[i].y, input[i].x);
 	}
@@ -181,7 +181,7 @@ __global__ void createXConfVec( float xConf,  float vecStep, cufftReal* output, 
 __global__ void forPhaseImage( float mean2,  cufftReal* xConfVec, cufftReal* input, int numElements) {
 	int x = blockIdx.x;
 	int y = threadIdx.y;
-	int i = blockIdx.x + threadIdx.y * gridDim.x;
+	int i = blockIdx.x * blockDim.y + threadIdx.y;
 	if (i < numElements) {
 		input[x + y * gridDim.x] = input[x + y * gridDim.x] + xConfVec[x] - mean2;
 		if (input[x + y * gridDim.x] < 0)
@@ -191,14 +191,14 @@ __global__ void forPhaseImage( float mean2,  cufftReal* xConfVec, cufftReal* inp
 
 __global__ void calHeight( cufftReal* input, float mean2, cufftReal* output, int numElements) {
 	int dn = 0.075;
-	int i = blockIdx.x + threadIdx.y * gridDim.x;
+	int i = blockIdx.x * blockDim.y + threadIdx.y;
 	if (i < numElements) {
 		output[i] = (input[i] * lambda / 2 / pi / dn - mean2) / 4 * 3;
 	}
 }
 
 __global__ void calOutputImage( cufftReal* input, float* output, int numElements) {
-	int i = blockIdx.x + threadIdx.y * gridDim.x;
+	int i = blockIdx.x * blockDim.y + threadIdx.y;
 	if (i < numElements) {
 		output[i] = ((input[i] + 15) / 30) * 256 - 1;
 	}
@@ -240,7 +240,7 @@ bool getImageInfo( image* targetImage ) {
 		float tempMin = 10000;
 		for (int i = 0; i < targetImage->height; i++) {
 			for (int j = 0; j < targetImage->width; j++) {
-				targetImage->imageData[i*targetImage->width + j] = ((float)targetImage->rawImage[i][j] / 256);
+				targetImage->imageData[i*targetImage->height + j] = ((float)targetImage->rawImage[j][i] / 256);
 				if (tempMax < targetImage->imageData[i * targetImage->width + j]) 
 					tempMax = targetImage->imageData[i * targetImage->width + j];
 				if (tempMin > targetImage->imageData[i * targetImage->width + j])
@@ -283,7 +283,6 @@ void fourierFilterForCalib(image* calibImage) {
 	dim3 blockSizeL(1, 960, 1), gridSize(1280, 1, 1), blockSizeS(1, 481, 1);
 
 	float* calibAbsImage = new float[imageSizeS];
-	cout << &calibAbsImage << endl;
 
 	realWrite("input for fourierFiltered", calibImage->imageData, 1280, "../Debug/input_FF.txt");
 
