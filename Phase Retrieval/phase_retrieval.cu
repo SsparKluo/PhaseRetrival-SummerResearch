@@ -291,7 +291,7 @@ void fourierFilterForCalib(image* calibImage) {
 
 	float* calibAbsImage = new float[imageSizeS];
 
-	realWrite("input for fourierFiltered", calibImage->imageData, 960, "../Debug/input_FF.txt");
+	realWrite("input for fourierFiltered", calibImage->imageData, 960, "../Debug/input_FF.csv");
 
 	cufftReal* dev_calibImage, * dev_calibABSFFTShifted;
 	cufftComplex* dev_calibFFT, * dev_circCalibFFT, * dev_calibFilteredBaseband, * dev_calibCircFilteredFFT, * dev_filteredCalibFFT, * dev_calibFFTShifted;
@@ -328,7 +328,7 @@ void fourierFilterForCalib(image* calibImage) {
 	if (cudaSuccess != a)
 		cout << "cuda memory cpy error!" << endl;
 	cout << a << endl;
-	complexWrite("temp dubug info", tempOut, 481, "../Debug/calib_FFT.txt");
+	complexWrite("temp dubug info", tempOut, 481, "../Debug/calib_FFT.csv");
 
 	FFTShift2D <<< gridSize, blockSizeS >>> (dev_calibFFT, dev_calibFFTShifted, imageSizeS);
 	if (cudaSuccess != cudaGetLastError())
@@ -344,7 +344,7 @@ void fourierFilterForCalib(image* calibImage) {
 		cout << "cuda memory cpy error!" << endl;
 	cout << b << endl;
 
-	realWrite("calib abs image", calibAbsImage, 481, "../Debug/calib_abs_image.txt");
+	realWrite("calib abs image", calibAbsImage, 481, "../Debug/calib_abs_image.csv");
 
 	calibImage->fftMaxPosition = findMaxPoint(calibAbsImage);
 
@@ -363,7 +363,7 @@ void fourierFilterForCalib(image* calibImage) {
 	if (cudaSuccess != cudaMemcpy(calibImage->filteredBaseband, dev_calibFilteredBaseband, (calibImage->imagePixels ) * sizeof(float), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error!" << endl;
 
-	complexWrite("calib filtered baseband", calibImage->filteredBaseband, 960, "../Debug/calib_filtered_baseband.txt");
+	complexWrite("calib filtered baseband", calibImage->filteredBaseband, 960, "../Debug/calib_filtered_baseband.csv");
 
 	if (cudaSuccess != cudaFree(dev_calibImage))
 		cout<<"cude memory free error!"<<endl;
@@ -440,7 +440,7 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 	if (cudaSuccess != cudaMemcpy(testImage->filteredBaseband, dev_testFilteredBaseband, (testImage->imagePixels) * sizeof(float), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error" << endl;
 
-	complexWrite("test filtered baseband", testImage->filteredBaseband, 960, "../Debug/test_filtered_baseband.txt");
+	complexWrite("test filtered baseband", testImage->filteredBaseband, 960, "../Debug/test_filtered_baseband.csv");
 
 	if (cudaSuccess != cudaFree(dev_testImage))
 		cout << "cude memory free error!" << endl;
@@ -479,7 +479,7 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 		printf("phase calculate Error!\n");
 	if (cudaSuccess != cudaMemcpy(phaseImage, dev_phaseImage, testImage->imagePixels * sizeof(float), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error!" << endl;
-	realWrite("phase image", phaseImage, 960, "..\ouput_text\phase_image1.txt");
+	realWrite("phase image", phaseImage, 960, "..\ouput_text\phase_image1.csv");
 	/*
 	if (!myUnwrapInitialize()) {
 		cout << "matlab unwrap function initialize error" << endl;
@@ -490,7 +490,7 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 	myUnwrap(matlabInput);
 	matlabOutput.GetData(phaseImage, 960 * 1280);
 	//别忘了调整matlab\extern的地址
-	realWrite("phase image after unwrapping", phaseImage, 1280, "..\ouput_text\phase_image2.txt");
+	realWrite("phase image after unwrapping", phaseImage, 1280, "..\ouput_text\phase_image2.csv");
 	*/
 	if (cudaSuccess != cudaMemcpy(dev_phaseImage, phaseImage, testImage->imagePixels * sizeof(float), cudaMemcpyHostToDevice))
 		cout << "cuda memory cpy error!" << endl;
@@ -575,20 +575,13 @@ void realWrite(const char* title, float* input , int height, const char* filenam
 
 	ofstream outFile;
 	outFile.open(filename);
-	outFile << title << ": " << endl;
 	outFile.setf(ios::fixed, ios::floatfield);
 	outFile.precision(7);
-	outFile << "line 0: ";
-	for (int i = 0; i < 1280; i++) {
-		outFile << i << " | ";
-	}
-	outFile << endl;
 	for (int y = 0; y < height; y++) {
-		outFile << "line " << y+1 << ": ";
 		for (int x = 0; x < 1280; x++) {
-			outFile << input[x + y * 1280] << " | ";
+			outFile << input[x * height + y] << ",";
 		}
-		outFile << endl;
+		outFile << " " << endl;
 	}
 
 }
@@ -596,20 +589,13 @@ void realWrite(const char* title, float* input , int height, const char* filenam
 void complexWrite(const char* title, float2* input, int height, const char* filename) {
 	ofstream outFile;
 	outFile.open(filename);
-	outFile << title << ": " << endl;
 	outFile.setf(ios::fixed, ios::floatfield);
 	outFile.precision(7);
-	outFile << "line 0: ";
-	for (int i = 0; i < 1280; i++) {
-		outFile << i << "|" << i << "i"<< " | ";
-	}
-	outFile << endl;
 	for (int y = 0; y < height; y++) {
-		outFile << "line " << y << ": ";
 		for (int x = 0; x < 1280; x++) {
-			outFile << input[x + y * 1280].x << "|" << input[x + y * 1280].y << "i" << " | ";
+			outFile << input[x * height + y].x << "+" << input[x * height + y].y << "i" << ",";
 		}
-		outFile << endl;
+		outFile << " " <<endl;
 	}
 }
 
