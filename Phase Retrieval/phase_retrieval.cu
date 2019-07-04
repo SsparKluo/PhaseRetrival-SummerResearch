@@ -117,13 +117,19 @@ __global__ void FFTShift2D( cufftComplex* input, cufftComplex* output, int numEl
 	int i = blockIdx.x * blockDim.y + threadIdx.y;
 	int half = 640;
 	if (i < numElements) {
-		if (x >= half) {
-			output[y + (x - half) * blockDim.y].x = input[y + x * blockDim.y].x;
-			output[y + (x - half) * blockDim.y].y = input[y + x * blockDim.y].y;
+		if (y >= 480) {
+			if (x >= half) {
+				output[y + (x - half) * blockDim.y].x = input[y - 480 + x * blockDim.y].x;
+				output[y + (x - half) * blockDim.y].y = input[y - 480 + x * blockDim.y].y;
+			}
+			else {
+				output[y + (x + half) * blockDim.y].x = input[y - 480 + x * blockDim.y].x;
+				output[y + (x + half) * blockDim.y].y = input[y - 480 + x * blockDim.y].y;
+			}
 		}
 		else {
-			output[y + (x + half) * blockDim.y].x = input[y + x * blockDim.y].x;
-			output[y + (x + half) * blockDim.y].y = input[y + x * blockDim.y].y;
+			output[y + x * blockDim.y].x = input[y + 1 * blockDim.y * x].x;
+			output[y + x * blockDim.y].y = input[y + 1 * blockDim.y * x].y;
 		}
 	}
 }
@@ -156,6 +162,7 @@ __global__ void circShift2D( cufftComplex* input,  int2 maxPoint, cufftComplex* 
 	int preX = x - 640 + maxPoint.x;
 	int preY = y - 480 + maxPoint.y;
 	if (i < numElements) {
+		/*
 		if (preX < 0)
 			preX = 1280 + preX;
 		if (preX >= 1280)
@@ -171,6 +178,17 @@ __global__ void circShift2D( cufftComplex* input,  int2 maxPoint, cufftComplex* 
 			output[y + x * blockDim.y].x = input[preY + preX * 481].x;
 			output[y + x * blockDim.y].y = input[preY + preX * 481].y;
 		}
+		*/
+		if (preX < 0)
+			preX = 1280 + preX;
+		if (preX >= 1280)
+			preX = preX - 1280;
+		if (preY < 0)
+			preY = 960 + preY;
+		if (preY >= 960)
+			preY = preY - 960;
+		output[y + x * blockDim.y].x = input[preY + preX * blockDim.y].x;
+		output[y + x * blockDim.y].y = input[preY + preX * blockDim.y].y;
 	}
 }
 
@@ -251,7 +269,7 @@ bool getImageInfo( image* targetImage ) {
 		float tempMin = 10000;
 		for (int i = 0; i < targetImage->width; i++) {
 			for (int j = 0; j < targetImage->height; j++) {
-				targetImage->imageData[i*targetImage->height + j] = ((float)targetImage->rawImage[j][i] / 256);
+				targetImage->imageData[i*targetImage->height + j] = ((float)targetImage->rawImage[j][i] / 255);
 				//if (tempMax < targetImage->imageData[i * targetImage->width + j]) 
 				//	tempMax = targetImage->imageData[i * targetImage->width + j];
 				//if (tempMin > targetImage->imageData[i * targetImage->width + j])
@@ -316,7 +334,7 @@ void fourierFilterForCalib(image* calibImage) {
 		cout << "cuda malloc error8!" << endl;
 	if (cudaSuccess != cudaMalloc((void**)& dev_filteredCalibFFT, sizeof(float2) * imageSizeL))
 		cout << "cuda malloc error8!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_calibFFTShifted, sizeof(float2) * imageSizeS))
+	if (cudaSuccess != cudaMalloc((void**)& dev_calibFFTShifted, sizeof(float2) * imageSizeL))
 		cout << "cuda malloc error8!" << endl;
 
 	cufftHandle FFT;
@@ -335,7 +353,7 @@ void fourierFilterForCalib(image* calibImage) {
 	cout << a << endl;
 	complexWrite("temp dubug info", tempOut, 481, "../Debug/calib_FFT.csv");
 
-	FFTShift2D <<< gridSize, blockSizeS >>> (dev_calibFFT, dev_calibFFTShifted, imageSizeS);
+	FFTShift2D <<< gridSize, blockSizeL >>> (dev_calibFFT, dev_calibFFTShifted, imageSizeL);
 	if (cudaSuccess != cudaGetLastError())
 		printf("FFTShift error!\n");
 	
@@ -420,7 +438,7 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 		cout << "cuda malloc error8!" << endl;
 	if (cudaSuccess != cudaMalloc((void**)& dev_filteredTestFFT, sizeof(float2) * testImage->imagePixels))
 		cout << "cuda malloc error8!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_testFFTShifted, sizeof(float2) * imageSizeS))
+	if (cudaSuccess != cudaMalloc((void**)& dev_testFFTShifted, sizeof(float2) * imageSizeL))
 		cout << "cuda malloc error8!" << endl;
 
 	cufftHandle FFT;
@@ -432,7 +450,7 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 		cout << "cuda memory cpy error!" << endl;
 	//
 	errorHandle(cufftExecR2C(FFT, dev_testImage, dev_testFFT));
-	FFTShift2D <<< gridSize, blockSizeS >>> (dev_testFFT, dev_testFFTShifted, imageSizeS);
+	FFTShift2D <<< gridSize, blockSizeL >>> (dev_testFFT, dev_testFFTShifted, imageSizeL);
 	if (cudaSuccess != cudaGetLastError())
 		printf("FFT shift Error!\n");
 	cudaThreadSynchronize();
