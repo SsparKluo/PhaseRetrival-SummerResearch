@@ -144,8 +144,8 @@ __global__ void IFFTShift2D( cufftComplex* input, cufftComplex* output, int numE
 			preX = x - halfX;
 		else
 			preX = x + halfX;
-		output[x + gridDim.x * y].x = input[preX + gridDim.x * preY].x;
-		output[x + gridDim.x * y].y = input[preX + gridDim.x * preY].y;
+		output[y + x * blockDim.y].x = input[preY + preX * blockDim.y].x;
+		output[y + x * blockDim.y].y = input[preY + preX * blockDim.y].y;
 	}
 }
 
@@ -154,17 +154,22 @@ __global__ void circShift2D( cufftComplex* input,  int2 maxPoint, cufftComplex* 
 	int y = threadIdx.y;
 	int i = blockIdx.x * blockDim.y + threadIdx.y;
 	int preX = x - 640 + maxPoint.x;
-	int preY = x - 480 + maxPoint.y;
+	int preY = y - 480 + maxPoint.y;
 	if (i < numElements) {
 		if (preX < 0)
 			preX = 1280 + preX;
+		if (preX >= 1280)
+			preX = preX - 1280;
 		if (preY < 0 || preY > 480) {
-			output[x + gridDim.x + y].x = 0;
-			output[x + gridDim.x + y].y = 0;
+			preX = 1279 - preX;
+			if (preY < 0)
+				preY = -preY;
+			else
+				preY = 480 - preY;
 		}
 		else {
-			output[x + gridDim.x * y].x = input[preX + gridDim.x * preY].x;
-			output[x + gridDim.x * y].y = input[preX + gridDim.x * preY].y;
+			output[y + x * blockDim.y].x = input[preY + preX * 481].x;
+			output[y + x * blockDim.y].y = input[preY + preX * 481].y;
 		}
 	}
 }
@@ -347,8 +352,14 @@ void fourierFilterForCalib(image* calibImage) {
 	realWrite("calib abs image", calibAbsImage, 481, "../Debug/calib_abs_image.csv");
 
 	calibImage->fftMaxPosition = findMaxPoint(calibAbsImage);
+	cout << "Xmax= " << calibImage->fftMaxPosition.x << ", Ymax= " << calibImage->fftMaxPosition.y << endl;
 
+	float2* circfft = new float2[imageSizeL];
 	circShift2D <<<gridSize, blockSizeL >>> (dev_calibFFT, calibImage->fftMaxPosition, dev_circCalibFFT, imageSizeL);
+	if (cudaSuccess != cudaMemcpy(circfft, dev_circCalibFFT, imageSizeL * sizeof(cufftComplex), cudaMemcpyDeviceToHost))
+		cout << "cuda memory cpy error!" << endl;
+	complexWrite("fft after circshift", circfft, 960, "../Debug/circFFT.csv");
+
 	if (cudaSuccess != cudaGetLastError())
 		printf("circle shift error!\n");
 	createFilter << <gridSize, blockSizeL >> > (80, calibImage->fftMaxPosition, dev_circCalibFFT, dev_calibCircFilteredFFT, imageSizeL);//???
