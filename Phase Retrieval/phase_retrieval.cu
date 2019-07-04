@@ -21,34 +21,36 @@ using namespace std;
 class image {
 public:
 	char filename[50];
-	double maxIntensity, minIntensity;
+	float maxIntensity, minIntensity;
 	int height, width;
 	int imagePixels;
 	uint8** rawImage;
-	double* imageData;
+	float* imageData;
 	int2 fftMaxPosition;
-	double2* filteredBaseband;
+	float2* filteredBaseband;
+	float* imageFilter;
 
 	image() {
 		rawImage = (uint8 * *)malloc(sizeof(uint8*) * 960);
 		for (int i = 0; i < 960; i++) {
 			rawImage[i] = (uint8*)malloc(sizeof(uint8) * 1280);
 		}
-		filteredBaseband =(double2*)malloc(sizeof(double)*2*1280*960);
+		filteredBaseband =(float2*)malloc(sizeof(float)*2*1280*960);
+		imageFilter = new float[960 * 1280];
 	}
 };
 
 bool getImageInfo(image* targetImage);// Used for get the useful data in tiff image, and return false when the filename of the target image is invalid.
-double* phaseRetrieval(image* calibImage, image* testImage);
+float* phaseRetrieval(image* calibImage, image* testImage);
 void fourierFilterForCalib(image* calibImage);
-int2 findMaxPoint(double* input); 
-//void imageFileWrite(double* input, const char* filename, int height);
-void complexWrite(const char* title, double2* input, int width, const char* filename);
-void realWrite(const char* title, double* input, int width, const char* filename);
+int2 findMaxPoint(float* input); 
+void imageFileWrite(float* input, char* filename);
+void complexWrite(const char* title, float2* input, int width, const char* filename);
+void realWrite(const char* title, float* input, int width, const char* filename);
 void errorHandle(int input);
 
 
-__global__ void vectorAdd( double* a,  double* b, double* c, int numElements) {
+__global__ void vectorAdd( float* a,  float* b, float* c, int numElements) {
 	int x = blockIdx.x;
 	int y = threadIdx.y;
 	int i = blockIdx.x * blockDim.y + threadIdx.y;
@@ -56,7 +58,7 @@ __global__ void vectorAdd( double* a,  double* b, double* c, int numElements) {
 		c[i] = a[i] + b[i];
 }
 
-__global__ void vectorNumMultiple( double* a,  double* b, double* c, int numElements) {
+__global__ void vectorNumMultiple( float* a,  float* b, float* c, int numElements) {
 	int x = blockIdx.x;
 	int y = threadIdx.y;
 	int i = blockIdx.x * blockDim.y + threadIdx.y;
@@ -64,7 +66,7 @@ __global__ void vectorNumMultiple( double* a,  double* b, double* c, int numElem
 		c[i] = a[i] * b[i];
 }
 
-__global__ void numMultipleForComplex( double2* a,  double* b, double2* c, int numElements) {
+__global__ void numMultipleForComplex( float2* a,  float* b, float2* c, int numElements) {
 	int x = blockIdx.x;
 	int y = threadIdx.y;
 	int i = blockIdx.x + threadIdx.y * gridDim.x;
@@ -74,7 +76,7 @@ __global__ void numMultipleForComplex( double2* a,  double* b, double2* c, int n
 	}
 }
 
-__global__ void vectorNumdivide( double2* dividend,  double2* divisor, double2* output, int numElements) {
+__global__ void vectorNumdivide( float2* dividend,  float2* divisor, float2* output, int numElements) {
 	int x = blockIdx.x;
 	int y = threadIdx.y;
 	int i = blockIdx.x * blockDim.y + threadIdx.y;
@@ -85,7 +87,7 @@ __global__ void vectorNumdivide( double2* dividend,  double2* divisor, double2* 
 
 }
 
-__global__ void getAbsOfComplexMatric( cufftDoubleComplex* input, cufftDoubleReal* output, int numElements) {
+__global__ void getAbsOfComplexMatric( cufftComplex* input, cufftReal* output, int numElements) {
 	int x = blockIdx.x;
 	int y = threadIdx.y;
 	int i = blockIdx.x * blockDim.y + threadIdx.y;
@@ -93,36 +95,40 @@ __global__ void getAbsOfComplexMatric( cufftDoubleComplex* input, cufftDoubleRea
 		output[i] = sqrt(input[i].x * input[i].x + input[i].y * input[i].y);
 }
 
-__global__ void createFilter( int padding,  int2 maxPoint, double* imageFilter, int numElements) {
+__global__ void createFilter( int padding,  int2 maxPoint, float2* input, float2* output, int numElements) {
 	int x = blockIdx.x;
 	int y = threadIdx.y;
 	int i = blockIdx.x * blockDim.y + threadIdx.y;
 	if (i < numElements) {
-		if ((x - maxPoint.x) * (x - maxPoint.x) + (y - maxPoint.y) * (y - maxPoint.y) <= padding * padding)
-			imageFilter[i] = 1;
-		else
-			imageFilter[i] = 0;
+		if ((x * x + y * y) <= padding * padding) {
+			output[i].x = input[i].x;
+			output[i].y = input[i].y;
+		}
+		else {
+			output[i].x = 0;
+			output[i].y = 0;
+		}
 	}
 }
 
-__global__ void FFTShift2D( cufftDoubleComplex* input, cufftDoubleComplex* output, int numElements) {
+__global__ void FFTShift2D( cufftComplex* input, cufftComplex* output, int numElements) {
 	int x = blockIdx.x;
 	int y = threadIdx.y;
 	int i = blockIdx.x * blockDim.y + threadIdx.y;
-	int half = 640;
+	int half = gridDim.x / 2;
 	if (i < numElements ) {
-		if (x >= half ) {
-			output[y + (x - half) * blockDim.y].x = input[y + x * blockDim.y].x;
-			output[y + (x - half) * blockDim.y].y = input[y + x * blockDim.y].y;
+		if (y >= half / 2) {
+			output[(y - half) * gridDim.x + x].x = input[y * gridDim.x + x].x;
+			output[(y - half) * gridDim.x + x].y = input[y * gridDim.x + x].y;
 		}
 		else {
-			output[y + (x + half) * blockDim.y].x = input[y + x * blockDim.y].x;
-			output[y + (x + half) * blockDim.y].y = input[y + x * blockDim.y].y;
+			output[(y + half) * gridDim.x + x].x = input[y * gridDim.x + x].x;
+			output[(y + half) * gridDim.x + x].y = input[y * gridDim.x + x].y;
 		}
 	}
 }
 
-__global__ void IFFTShift2D( cufftDoubleComplex* input, cufftDoubleComplex* output, int numElements) {
+__global__ void IFFTShift2D( cufftComplex* input, cufftComplex* output, int numElements) {
 	int x = blockIdx.x;
 	int y = threadIdx.y;
 	int i = blockIdx.x * blockDim.y + threadIdx.y;
@@ -143,7 +149,7 @@ __global__ void IFFTShift2D( cufftDoubleComplex* input, cufftDoubleComplex* outp
 	}
 }
 
-__global__ void circShift2D( cufftDoubleComplex* input,  int2 maxPoint, cufftDoubleComplex* output, int numElements) {
+__global__ void circShift2D( cufftComplex* input,  int2 maxPoint, cufftComplex* output, int numElements) {
 	int x = blockIdx.x;
 	int y = threadIdx.y;
 	int i = blockIdx.x * blockDim.y + threadIdx.y;
@@ -163,7 +169,7 @@ __global__ void circShift2D( cufftDoubleComplex* input,  int2 maxPoint, cufftDou
 	}
 }
 
-__global__ void phaseCalculate( cufftDoubleComplex* input, cufftDoubleReal* output, int numElements) {
+__global__ void phaseCalculate( cufftComplex* input, cufftReal* output, int numElements) {
 
 	int i = blockIdx.x * blockDim.y + threadIdx.y;
 	if (i < numElements) {
@@ -171,14 +177,14 @@ __global__ void phaseCalculate( cufftDoubleComplex* input, cufftDoubleReal* outp
 	}
 }
 
-__global__ void createXConfVec( double xConf,  double vecStep, cufftDoubleReal* output, int numElements) {
+__global__ void createXConfVec( float xConf,  float vecStep, cufftReal* output, int numElements) {
 	int i = threadIdx.x;
 	if (i < numElements) {
 		output[i] = xConf - i * vecStep;
 	}
 }
 
-__global__ void forPhaseImage( double mean2,  cufftDoubleReal* xConfVec, cufftDoubleReal* input, int numElements) {
+__global__ void forPhaseImage( float mean2,  cufftReal* xConfVec, cufftReal* input, int numElements) {
 	int x = blockIdx.x;
 	int y = threadIdx.y;
 	int i = blockIdx.x * blockDim.y + threadIdx.y;
@@ -189,7 +195,7 @@ __global__ void forPhaseImage( double mean2,  cufftDoubleReal* xConfVec, cufftDo
 	}
 }
 
-__global__ void calHeight( cufftDoubleReal* input, double mean2, cufftDoubleReal* output, int numElements) {
+__global__ void calHeight( cufftReal* input, float mean2, cufftReal* output, int numElements) {
 	int dn = 0.075;
 	int i = blockIdx.x * blockDim.y + threadIdx.y;
 	if (i < numElements) {
@@ -197,7 +203,7 @@ __global__ void calHeight( cufftDoubleReal* input, double mean2, cufftDoubleReal
 	}
 }
 
-__global__ void calOutputImage( cufftDoubleReal* input, double* output, int numElements) {
+__global__ void calOutputImage( cufftReal* input, float* output, int numElements) {
 	int i = blockIdx.x * blockDim.y + threadIdx.y;
 	if (i < numElements) {
 		output[i] = ((input[i] + 15) / 30) * 256 - 1;
@@ -218,7 +224,7 @@ int main() {
 		cin >> testImage.filename;
 	} while (!getImageInfo(&testImage));
 	fourierFilterForCalib(&calibImage);
-	double* result = phaseRetrieval(&calibImage,&testImage);
+	float* result = phaseRetrieval(&calibImage,&testImage);
 }
 
 bool getImageInfo( image* targetImage ) {
@@ -228,7 +234,7 @@ bool getImageInfo( image* targetImage ) {
 		TIFFGetField(tif, TIFFTAG_IMAGELENGTH, &targetImage->height);
 		TIFFGetField(tif, TIFFTAG_IMAGEWIDTH, &targetImage->width);
 		targetImage->imagePixels = targetImage->height * targetImage->width;
-		targetImage->imageData = new double[targetImage->imagePixels];
+		targetImage->imageData = new float[targetImage->imagePixels];
 		targetImage->rawImage = new uint8 * [targetImage->height];
 		for (int i = 0; i < targetImage->height; i++) {
 			targetImage->rawImage[i] =(uint8*)malloc(sizeof(uint8)*targetImage->width);
@@ -236,15 +242,15 @@ bool getImageInfo( image* targetImage ) {
 		for (int i = 0; i < targetImage->height; i++) {
 			TIFFReadScanline(tif, targetImage->rawImage[i], i);
 		}
-		double tempMax = 0;
-		double tempMin = 10000;
+		float tempMax = 0;
+		float tempMin = 10000;
 		for (int i = 0; i < targetImage->width; i++) {
 			for (int j = 0; j < targetImage->height; j++) {
-				targetImage->imageData[i*targetImage->height + j] = ((double)targetImage->rawImage[j][i] / 256);
+				targetImage->imageData[i*targetImage->height + j] = ((float)targetImage->rawImage[j][i] / 256);
 				//if (tempMax < targetImage->imageData[i * targetImage->width + j]) 
-					//tempMax = targetImage->imageData[i * targetImage->width + j];
+				//	tempMax = targetImage->imageData[i * targetImage->width + j];
 				//if (tempMin > targetImage->imageData[i * targetImage->width + j])
-					//tempMin = targetImage->imageData[i * targetImage->width + j];
+				//	tempMin = targetImage->imageData[i * targetImage->width + j];
 			}
 		}
 		targetImage->maxIntensity = tempMax;
@@ -260,9 +266,9 @@ bool getImageInfo( image* targetImage ) {
 	return true;
 }
 
-int2 findMaxPoint(double* input) {
+int2 findMaxPoint(float* input) {
 	int2 tempPoint = {0,0};
-	double tempMax = 0;
+	float tempMax = 0;
 	for (int i = 0; i < 481; i++) {
 		for (int j = 0; j < 1280; j++) {
 			if (j > 600 && j < 680)
@@ -280,49 +286,47 @@ int2 findMaxPoint(double* input) {
 void fourierFilterForCalib(image* calibImage) {
 	cout << "Part: fourier filter for calib image" << endl;
 	int imageSizeS = 1280 * 481;
+	int imgaeSizeL = 1280 * 960;
 	dim3 blockSizeL(1, 960, 1), gridSize(1280, 1, 1), blockSizeS(1, 481, 1);
 
-	double* calibAbsImage = new double[imageSizeS];
+	float* calibAbsImage = new float[imageSizeS];
 
-	//realWrite("input for fourierFiltered", calibImage->imageData, 1280, "../Debug/input_FF.txt");
+	realWrite("input for fourierFiltered", calibImage->imageData, 1280, "../Debug/input_FF.txt");
 
-	cufftDoubleReal* dev_calibImage, * dev_calibABSFFTShifted, * dev_calibImageFilter;
-	cufftDoubleComplex* dev_calibFFT, * dev_calibFFTShifted, * dev_filteredCalibFFT, * dev_filterCircCalibFFT, * dev_calibFilteredBaseband;
-	int n = cudaMalloc((void**)& dev_calibImage, sizeof(double) * calibImage->imagePixels);
+	cufftReal* dev_calibImage, * dev_calibABSFFTShifted;
+	cufftComplex* dev_calibFFT, * dev_circCalibFFT, * dev_calibFilteredBaseband, * dev_calibCircFilteredFFT, * dev_filteredCalibFFT;
+	int n = cudaMalloc((void**)& dev_calibImage, sizeof(float) * calibImage->imagePixels);
 	if (cudaSuccess != n)
 		cout << "cuda malloc error1!" << endl;
 	cout << n << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_calibFilteredBaseband, sizeof(double2) * calibImage->imagePixels))
+	if (cudaSuccess != cudaMalloc((void**)& dev_calibFilteredBaseband, sizeof(float2) * calibImage->imagePixels))
 		cout << "cuda malloc error2!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_calibImageFilter, sizeof(double) * imageSizeS))
+	if (cudaSuccess != cudaMalloc((void**)& dev_calibCircFilteredFFT, sizeof(float2) * imageSizeS))
 		cout << "cuda malloc error3!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_calibABSFFTShifted, sizeof(double) * imageSizeS))
+	if (cudaSuccess != cudaMalloc((void**)& dev_calibABSFFTShifted, sizeof(float2) * imageSizeS))
 		cout << "cuda malloc error4!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_calibFFT, sizeof(double2) * imageSizeS))
+	if (cudaSuccess != cudaMalloc((void**)& dev_calibFFT, sizeof(float2) * imageSizeS))
 		cout << "cuda malloc error5!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_filteredCalibFFT, sizeof(double2) * calibImage->imagePixels))
-		cout << "cuda malloc error6!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_calibFFTShifted, sizeof(double2) * imageSizeS))
-		cout << "cuda malloc error7!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_filterCircCalibFFT, sizeof(double2) * calibImage->imagePixels))
+	if (cudaSuccess != cudaMalloc((void**)& dev_circCalibFFT, sizeof(float2) * calibImage->imagePixels))
+		cout << "cuda malloc error8!" << endl;
+	if (cudaSuccess != cudaMalloc((void**)& dev_filteredCalibFFT, sizeof(float2) * calibImage->imagePixels))
 		cout << "cuda malloc error8!" << endl;
 
 	cufftHandle FFT;
 	cufftHandle IFFT;
-	errorHandle(cufftPlan2d(&FFT, 1280, 960, CUFFT_D2Z));
-	errorHandle(cufftPlan2d(&IFFT, 1280, 960, CUFFT_Z2Z));
+	errorHandle(cufftPlan2d(&FFT, 1280, 960, CUFFT_R2C));
+	errorHandle(cufftPlan2d(&IFFT, 1280, 960, CUFFT_C2C));
 
-	if (cudaSuccess != cudaMemcpy(dev_calibImage, calibImage->imageData, calibImage->imagePixels * sizeof(cufftDoubleReal), cudaMemcpyHostToDevice))
+	if (cudaSuccess != cudaMemcpy(dev_calibImage, calibImage->imageData, calibImage->imagePixels * sizeof(cufftReal), cudaMemcpyHostToDevice))
 		cout << "cuda memory cpy error!" << endl;
 
-	errorHandle(cufftExecD2Z(FFT, dev_calibImage, dev_calibFFT));
-	cudaDeviceSynchronize();
-	double2* tempOut = (double2*)malloc(sizeof(double2) * 1280 * 481);
-	int a = cudaMemcpy((void*)tempOut, (void*)dev_calibFFT, imageSizeS * sizeof(cufftDoubleComplex), cudaMemcpyDeviceToHost);
+	errorHandle(cufftExecR2C(FFT, dev_calibImage, dev_calibFFT));
+	float2* tempOut = (float2*)malloc(sizeof(float2) * 1280 * 481);
+	int a = cudaMemcpy((void*)tempOut, (void*)dev_calibFFT, imageSizeS * sizeof(cufftComplex), cudaMemcpyDeviceToHost);
 	if (cudaSuccess != a)
 		cout << "cuda memory cpy error!" << endl;
 	cout << a << endl;
-//	complexWrite("temp dubug info", tempOut, 1280, "../Debug/tempout.txt");
+	complexWrite("temp dubug info", tempOut, 1280, "../Debug/tempout.txt");
 
 	FFTShift2D <<< gridSize, blockSizeS >>> (dev_calibFFT, dev_calibFFTShifted, imageSizeS);
 	if (cudaSuccess != cudaGetLastError())
@@ -333,146 +337,131 @@ void fourierFilterForCalib(image* calibImage) {
 		printf("get abs error!\n");
 
 
-	int b = cudaMemcpy((void*)calibAbsImage, (void*)dev_calibABSFFTShifted, imageSizeS * sizeof(cufftDoubleReal), cudaMemcpyDeviceToHost);
+	int b = cudaMemcpy((void*)calibAbsImage, (void*)dev_calibABSFFTShifted, imageSizeS * sizeof(cufftReal), cudaMemcpyDeviceToHost);
 	if (cudaSuccess != b)
 		cout << "cuda memory cpy error!" << endl;
 	cout << b << endl;
 
-	//imageFileWrite( calibAbsImage ,"calib_abs.tif", 481);
+	realWrite("calib abs image", calibAbsImage, 640, "..\ouput_text\calib_abs_image.txt");
 
 	calibImage->fftMaxPosition = findMaxPoint(calibAbsImage);
 
-	createFilter <<<gridSize, blockSizeS >>> (80, calibImage->fftMaxPosition, dev_calibImageFilter, imageSizeS);
-	if (cudaSuccess != cudaGetLastError())
-		printf("filter create error!\n");
-	numMultipleForComplex <<<gridSize, blockSizeS >>> (dev_calibFFT, dev_calibImageFilter, dev_filteredCalibFFT, imageSizeS);
-	if (cudaSuccess != cudaGetLastError())
-		printf("matrix num multiple error!\n");
-	circShift2D <<<gridSize, blockSizeL >>> (dev_filteredCalibFFT, calibImage->fftMaxPosition, dev_filterCircCalibFFT, imageSizeS);
+	circShift2D <<<gridSize, blockSizeL >>> (dev_calibFFT, calibImage->fftMaxPosition, dev_circCalibFFT, imageSizeL);
 	if (cudaSuccess != cudaGetLastError())
 		printf("circle shift error!\n");
-	IFFTShift2D <<<gridSize, blockSizeL >>> (dev_filterCircCalibFFT, dev_filteredCalibFFT, imageSizeS);
+	createFilter << <gridSize, blockSizeS >> > (80, calibImage->fftMaxPosition, dev_circCalibFFT, dev_calibCircFilteredFFT, imageSizeL);//???
+	if (cudaSuccess != cudaGetLastError())
+		printf("filter create error!\n");
+	IFFTShift2D <<<gridSize, blockSizeL >>> (dev_calibCircFilteredFFT, dev_filteredCalibFFT, imageSizeL);
 	if (cudaSuccess != cudaGetLastError())
 		printf("IFFT shift error!\n");
-	cufftExecZ2Z(IFFT, dev_filteredCalibFFT, dev_calibFilteredBaseband,CUFFT_INVERSE);
+	cufftExecC2C(IFFT, dev_filteredCalibFFT, dev_calibFilteredBaseband,CUFFT_INVERSE);
 	cudaThreadSynchronize();
 	
-	if (cudaSuccess != cudaMemcpy(calibImage->filteredBaseband, dev_calibFilteredBaseband, (calibImage->imagePixels + 960) * sizeof(double), cudaMemcpyDeviceToHost))
+	if (cudaSuccess != cudaMemcpy(calibImage->filteredBaseband, dev_calibFilteredBaseband, (calibImage->imagePixels ) * sizeof(float), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error!" << endl;
 
-	//complexWrite("calib filtered baseband", calibImage->filteredBaseband, 1280, "..\ouput_text\calib_filtered_baseband.txt");
+	complexWrite("calib filtered baseband", calibImage->filteredBaseband, 1280, "..\ouput_text\calib_filtered_baseband.txt");
 
 	if (cudaSuccess != cudaFree(dev_calibImage))
-		cout<<"cude meomory free error!"<<endl;
+		cout<<"cude memory free error!"<<endl;
 	if (cudaSuccess != cudaFree(dev_calibABSFFTShifted))
-		cout << "cude meomory free error!" << endl;
-	if (cudaSuccess != cudaFree(dev_calibImageFilter))
-		cout << "cude meomory free error!" << endl;
+		cout << "cude memory free error!" << endl;
+	if (cudaSuccess != cudaFree(dev_circCalibFFT))
+		cout << "cude memory free error!" << endl;
 	if (cudaSuccess != cudaFree(dev_calibFilteredBaseband))
-		cout << "cude meomory free error!" << endl;
+		cout << "cude memory free error!" << endl;
 	if (cudaSuccess != cudaFree(dev_calibFFT))
-		cout << "cude meomory free error!" << endl;
-	if (cudaSuccess != cudaFree(dev_calibFFTShifted))
-		cout << "cude meomory free error!" << endl;
+		cout << "cude memory free error!" << endl;
 	if (cudaSuccess != cudaFree(dev_filteredCalibFFT))
-		cout << "cude meomory free error!" << endl;
-	if (cudaSuccess != cudaFree(dev_filterCircCalibFFT))
-		cout << "cude meomory free error!" << endl;
+		cout << "cude memory free error!" << endl;
+	if (cudaSuccess != cudaFree(dev_calibCircFilteredFFT))
+		cout << "cude memory free error!" << endl;
 
 }
 
-double* phaseRetrieval(image* calibImage, image* testImage) {
+float* phaseRetrieval(image* calibImage, image* testImage) {
 	cout << "Part: phase retrieval" << endl;
 	int imageSizeS = 1280 * 481;
-	dim3 blockSizeL(1, 960, 1), gridSize(1280, 1, 1), blockSizeS(1, 481, 1);
+	int imageSizeL = 1280 * 960;
+	dim3 blockSizeL(1, 960, 1), gridSize(1280, 1, 1), blockSizeS(1, 641, 1);
 
-	double* testAbsImage = (double*)malloc(sizeof(double) * imageSizeS);
+	float* testAbsImage = (float*)malloc(sizeof(float) * imageSizeS);
 
-	cufftDoubleReal* dev_testImage, * dev_testABSFFTShifted, * dev_testImageFilter;
-	cufftDoubleComplex* dev_testFFT, * dev_testFFTShifted, * dev_filteredTestFFT, * dev_filterCircTestFFT, * dev_testFilteredBaseband;
-	if (cudaSuccess != cudaMalloc((void**)& dev_testImage, sizeof(double) * testImage->imagePixels))
-		cout << "cuda malloc error!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_testFilteredBaseband, sizeof(double2) * testImage->imagePixels))
-		cout << "cuda malloc error!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_testImageFilter, sizeof(double) * imageSizeS))
-		cout << "cuda malloc error!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_testABSFFTShifted, sizeof(double) * imageSizeS))
-		cout << "cuda malloc error!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_testFFT, sizeof(double2) * imageSizeS))
-		cout << "cuda malloc error!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_filteredTestFFT, sizeof(double2) * testImage->imagePixels))
-		cout << "cuda malloc error!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_testFFTShifted, sizeof(double2) * imageSizeS))
-		cout << "cuda malloc error!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_filterCircTestFFT, sizeof(double2) * testImage->imagePixels))
-		cout << "cuda malloc error!" << endl;
+	cufftReal* dev_testImage, * dev_testABSFFTShifted;
+	cufftComplex* dev_testFFT, * dev_circTestFFT, * dev_testFilteredBaseband, * dev_testCircFilteredFFT, * dev_filteredTestFFT;
+	int n = cudaMalloc((void**)& dev_testImage, sizeof(float) * testImage->imagePixels);
+	if (cudaSuccess != n)
+		cout << "cuda malloc error1!" << endl;
+	cout << n << endl;
+	if (cudaSuccess != cudaMalloc((void**)& dev_testFilteredBaseband, sizeof(float2) * testImage->imagePixels))
+		cout << "cuda malloc error2!" << endl;
+	if (cudaSuccess != cudaMalloc((void**)& dev_testCircFilteredFFT, sizeof(float2) * imageSizeS))
+		cout << "cuda malloc error3!" << endl; 
+	if (cudaSuccess != cudaMalloc((void**)& dev_testABSFFTShifted, sizeof(float2) * imageSizeS))
+		cout << "cuda malloc error4!" << endl;
+	if (cudaSuccess != cudaMalloc((void**)& dev_testFFT, sizeof(float2) * imageSizeS))
+		cout << "cuda malloc error5!" << endl;
+	if (cudaSuccess != cudaMalloc((void**)& dev_circTestFFT, sizeof(float2) * testImage->imagePixels))
+		cout << "cuda malloc error8!" << endl;
+	if (cudaSuccess != cudaMalloc((void**)& dev_filteredTestFFT, sizeof(float2) * testImage->imagePixels))
+		cout << "cuda malloc error8!" << endl;
 
 	cufftHandle FFT;
-	errorHandle(cufftPlan2d(&FFT, 1280, 960, CUFFT_D2Z));
+	errorHandle(cufftPlan2d(&FFT, 1280, 960, CUFFT_R2C));
 	cufftHandle IFFT;
-	errorHandle(cufftPlan2d(&IFFT, 1280, 960, CUFFT_Z2Z));
+	errorHandle(cufftPlan2d(&IFFT, 1280, 960, CUFFT_C2C));
 
-	if (cudaSuccess != cudaMemcpy(dev_testImage, testImage->imageData, testImage->imagePixels * sizeof(double), cudaMemcpyHostToDevice))
+	if (cudaSuccess != cudaMemcpy(dev_testImage, testImage->imageData, testImage->imagePixels * sizeof(float), cudaMemcpyHostToDevice))
 		cout << "cuda memory cpy error!" << endl;
 	//
-	errorHandle(cufftExecD2Z(FFT, dev_testImage, dev_testFFT));
+	errorHandle(cufftExecR2C(FFT, dev_testImage, dev_testFFT));
 	FFTShift2D <<< gridSize, blockSizeS >>> (dev_testFFT, dev_testFFTShifted, imageSizeS);
 	if (cudaSuccess != cudaGetLastError())
 		printf("FFT shift Error!\n");
-	getAbsOfComplexMatric <<< gridSize, blockSizeS >>> (dev_testFFTShifted, dev_testABSFFTShifted, imageSizeS);
-	if (cudaSuccess != cudaGetLastError())
-		printf("ABS Error!\n");
-	cudaDeviceSynchronize();
-
-	if (cudaSuccess != cudaMemcpy(testAbsImage, dev_testABSFFTShifted, (testImage->imagePixels / 2 + 960) * sizeof(double), cudaMemcpyDeviceToHost))
-		cout << "cuda memory cpy error!" << endl;
-
-	//realWrite("test abs image", testAbsImage, 640, "..\ouput_text\test_abs_image.txt");
-
-	testImage->fftMaxPosition = findMaxPoint(testAbsImage);
-	createFilter <<<gridSize, blockSizeS >>> (80, testImage->fftMaxPosition, dev_testImageFilter, imageSizeS);
-	if (cudaSuccess != cudaGetLastError())
-		printf("filter create Error!\n");
-	numMultipleForComplex <<<gridSize, blockSizeS >>> (dev_testFFT, dev_testImageFilter, dev_filteredTestFFT, imageSizeS);
-	if (cudaSuccess != cudaGetLastError())
-		printf("multiple Error!\n");
-	circShift2D <<<gridSize, blockSizeL >>> (dev_filteredTestFFT, testImage->fftMaxPosition, dev_filterCircTestFFT, imageSizeS);
+	cudaThreadSynchronize();
+	
+	circShift2D <<<gridSize, blockSizeL >>> (dev_filteredTestFFT, testImage->fftMaxPosition, dev_circTestFFT, imageSizeL);
 	if (cudaSuccess != cudaGetLastError())
 		printf("circ shift Error!\n");
-	IFFTShift2D <<<gridSize, blockSizeL >>> (dev_filterCircTestFFT, dev_filteredTestFFT, imageSizeS);
+	createFilter << <gridSize, blockSizeL >> > (80, calibImage->fftMaxPosition, dev_circTestFFT, dev_testCircFilteredFFT, imageSizeL);
+	if (cudaSuccess != cudaGetLastError())
+		printf("filter create Error!\n");
+	IFFTShift2D <<<gridSize, blockSizeL >>> (dev_testCircFilteredFFT, dev_filteredTestFFT, imageSizeL);
 	if (cudaSuccess != cudaGetLastError())
 		printf("IFFT shift Error!\n");
-	errorHandle(cufftExecZ2Z(IFFT, dev_filteredTestFFT, dev_testFilteredBaseband,CUFFT_INVERSE));
+	errorHandle(cufftExecC2C(IFFT, dev_filteredTestFFT, dev_testFilteredBaseband,CUFFT_INVERSE));
 	cudaThreadSynchronize();
-	cudaMemcpy(testImage->filteredBaseband, dev_testFilteredBaseband, (testImage->imagePixels) * sizeof(double), cudaMemcpyDeviceToHost);
+	if (cudaSuccess != cudaMemcpy(testImage->filteredBaseband, dev_testFilteredBaseband, (testImage->imagePixels) * sizeof(float), cudaMemcpyDeviceToHost))
+		cout << "cuda memory cpy error" << endl;
 
-	complexWrite("test filtered baseband", testImage->filteredBaseband, 960, "../Debug/test_filtered_baseband.txt");
+	complexWrite("test filtered baseband", testImage->filteredBaseband, 1280, "..\ouput_text\test_filtered_baseband.txt");
 
 	if (cudaSuccess != cudaFree(dev_testImage))
-		cout << "cude meomory free error!" << endl;
+		cout << "cude memory free error!" << endl;
 	if (cudaSuccess != cudaFree(dev_testABSFFTShifted))
-		cout << "cude meomory free error!" << endl;
-	if (cudaSuccess != cudaFree(dev_testImageFilter))
-		cout << "cude meomory free error!" << endl;
+		cout << "cude memory free error!" << endl;
+	if (cudaSuccess != cudaFree(dev_circTestFFT))
+		cout << "cude memory free error!" << endl;
+	if (cudaSuccess != cudaFree(dev_testFilteredBaseband))
+		cout << "cude memory free error!" << endl;
 	if (cudaSuccess != cudaFree(dev_testFFT))
-		cout << "cude meomory free error!" << endl;
-	if (cudaSuccess != cudaFree(dev_testFFTShifted))
-		cout << "cude meomory free error!" << endl;
+		cout << "cude memory free error!" << endl;
 	if (cudaSuccess != cudaFree(dev_filteredTestFFT))
-		cout << "cude meomory free error!" << endl;
-	if (cudaSuccess != cudaFree(dev_filterCircTestFFT))
-		cout << "cude meomory free error!" << endl;
+		cout << "cude memory free error!" << endl;
+	if (cudaSuccess != cudaFree(dev_testCircFilteredFFT))
+		cout << "cude memory free error!" << endl;
 
-	double* phaseImage = (double*)malloc(sizeof(double) * testImage->imagePixels);
-	cufftDoubleReal* dev_phaseImage;
-	cufftDoubleComplex* dev_calibFilteredBaseband,* dev_finalImage;
-	if (cudaSuccess != cudaMalloc((void**)& dev_phaseImage, sizeof(double) * calibImage->imagePixels))
+	float* phaseImage = (float*)malloc(sizeof(float) * testImage->imagePixels);
+	cufftReal* dev_phaseImage;
+	cufftComplex* dev_calibFilteredBaseband,* dev_finalImage;
+	if (cudaSuccess != cudaMalloc((void**)& dev_phaseImage, sizeof(float) * calibImage->imagePixels))
 		cout << "cuda malloc error!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_calibFilteredBaseband, sizeof(double2) * calibImage->imagePixels))
+	if (cudaSuccess != cudaMalloc((void**)& dev_calibFilteredBaseband, sizeof(float2) * calibImage->imagePixels))
 		cout << "cuda malloc error!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_finalImage, sizeof(double2) * calibImage->imagePixels))
+	if (cudaSuccess != cudaMalloc((void**)& dev_finalImage, sizeof(float2) * calibImage->imagePixels))
 		cout << "cuda malloc error!" << endl;
-	if (cudaSuccess != cudaMemcpy(dev_calibFilteredBaseband, calibImage->filteredBaseband, testImage->imagePixels * sizeof(double2), cudaMemcpyHostToDevice))
+	if (cudaSuccess != cudaMemcpy(dev_calibFilteredBaseband, calibImage->filteredBaseband, testImage->imagePixels * sizeof(float2), cudaMemcpyHostToDevice))
 		cout << "cuda memory cpy error!" << endl;
 
 	vectorNumdivide <<<gridSize,blockSizeL>>> (dev_testFilteredBaseband, dev_calibFilteredBaseband, dev_finalImage, calibImage->imagePixels) ;
@@ -481,9 +470,9 @@ double* phaseRetrieval(image* calibImage, image* testImage) {
 	phaseCalculate <<<gridSize, blockSizeL >>> (dev_finalImage, dev_phaseImage, calibImage->imagePixels);
 	if (cudaSuccess != cudaGetLastError())
 		printf("phase calculate Error!\n");
-	if (cudaSuccess != cudaMemcpy(phaseImage, dev_phaseImage, testImage->imagePixels * sizeof(double), cudaMemcpyDeviceToHost))
+	if (cudaSuccess != cudaMemcpy(phaseImage, dev_phaseImage, testImage->imagePixels * sizeof(float), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error!" << endl;
-	realWrite("phase image", phaseImage, 960, "..\ouput_text\phase_image1.txt");
+	realWrite("phase image", phaseImage, 1280, "..\ouput_text\phase_image1.txt");
 	/*
 	if (!myUnwrapInitialize()) {
 		cout << "matlab unwrap function initialize error" << endl;
@@ -496,10 +485,10 @@ double* phaseRetrieval(image* calibImage, image* testImage) {
 	//别忘了调整matlab\extern的地址
 	realWrite("phase image after unwrapping", phaseImage, 1280, "..\ouput_text\phase_image2.txt");
 	*/
-	if (cudaSuccess != cudaMemcpy(dev_phaseImage, phaseImage, testImage->imagePixels * sizeof(double), cudaMemcpyHostToDevice))
+	if (cudaSuccess != cudaMemcpy(dev_phaseImage, phaseImage, testImage->imagePixels * sizeof(float), cudaMemcpyHostToDevice))
 		cout << "cuda memory cpy error!" << endl;
 
-	double xConf, yConf, xSum = 0, ySum = 0, vecStep, sum2=0, mean2;
+	float xConf, yConf, xSum = 0, ySum = 0, vecStep, sum2=0, mean2;
 	for (int i = 0; i < 960; i++) {
 		xSum += phaseImage[i * testImage->width + 29] - phaseImage[i * testImage->width + 1279 - 30];
 	}
@@ -515,39 +504,38 @@ double* phaseRetrieval(image* calibImage, image* testImage) {
 	}
 	mean2 = sum2 / 10000;
 
-	cufftDoubleReal* dev_xConfVec;
-	dim3 tempGrid(1, 1, 1), tempBlock(1280, 1, 1);
-	if (cudaSuccess != cudaMalloc((void**)& dev_xConfVec, sizeof(double) * 1280))
+	cufftReal* dev_xConfVec;
+	if (cudaSuccess != cudaMalloc((void**)& dev_xConfVec, sizeof(float) * 1280))
 		cout << "cuda malloc error!" << endl;
-	createXConfVec <<< tempGrid,tempBlock >>> (xConf,vecStep,dev_xConfVec,1280);
+	createXConfVec <<<1,1280 >>> (xConf,vecStep,dev_xConfVec,1280);
 	if (cudaSuccess != cudaGetLastError())
 		printf("xConf vec create Error!\n");
 
 	forPhaseImage<<<gridSize,blockSizeL>>>(mean2, dev_xConfVec, dev_phaseImage, testImage->imagePixels);
 	cudaFree(dev_xConfVec);
 	cudaThreadSynchronize();
-	if (cudaSuccess != cudaMemcpy(phaseImage, dev_phaseImage, testImage->imagePixels * sizeof(double), cudaMemcpyDeviceToHost))
+	if (cudaSuccess != cudaMemcpy(phaseImage, dev_phaseImage, testImage->imagePixels * sizeof(float), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error!" << endl;
 	//
-	double* height1 = (double*)malloc(sizeof(double) * testImage->imagePixels);
-	cufftDoubleReal* dev_height;
-	cudaMalloc((void**)& dev_height, sizeof(double) * testImage->imagePixels);
+	float* height1 = (float*)malloc(sizeof(float) * testImage->imagePixels);
+	cufftReal* dev_height;
+	cudaMalloc((void**)& dev_height, sizeof(float) * testImage->imagePixels);
 	calHeight <<<gridSize, blockSizeL >>> (dev_phaseImage,mean2,dev_height,testImage->imagePixels);
 	if (cudaSuccess != cudaGetLastError())
 		printf("cal height Error!\n");
 	cudaThreadSynchronize();
-	if (cudaSuccess != cudaMemcpy(height1, dev_height, testImage->imagePixels * sizeof(double), cudaMemcpyDeviceToHost))
+	if (cudaSuccess != cudaMemcpy(height1, dev_height, testImage->imagePixels * sizeof(float), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error!" << endl;
 
-	double* outputImage = (double*)malloc(sizeof(double) * testImage->imagePixels);
-	double* dev_output;
-	if (cudaSuccess != cudaMalloc((void**)& dev_output, sizeof(double)* testImage->imagePixels))
+	float* outputImage = (float*)malloc(sizeof(float) * testImage->imagePixels);
+	float* dev_output;
+	if (cudaSuccess != cudaMalloc((void**)& dev_output, sizeof(float)* testImage->imagePixels))
 		cout << "cuda malloc error!" << endl;
 	calOutputImage<<<gridSize, blockSizeL >>>(dev_height, dev_output, testImage->imagePixels);
 	if (cudaSuccess != cudaGetLastError())
 		printf("output image create Error!\n");
 	cudaThreadSynchronize();
-	if (cudaSuccess != cudaMemcpy(outputImage, dev_output, testImage->imagePixels * sizeof(double), cudaMemcpyDeviceToHost))
+	if (cudaSuccess != cudaMemcpy(outputImage, dev_output, testImage->imagePixels * sizeof(float), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error!" << endl;
 
 	cudaFree(dev_output);
@@ -555,28 +543,28 @@ double* phaseRetrieval(image* calibImage, image* testImage) {
 
 	return height1;
 }
-/*
-void imageFileWrite(double* input, char* filename, int height) {
 
+void imageFileWrite(float* input, char* filename) {
+	/*
 	TIFF* tif = TIFFOpen(filename, "w");
 	if (tif) {
-		TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, height);
+		TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, 960);
 		TIFFSetField(tif, TIFFTAG_IMAGELENGTH, 1280);
 		uint8** tempData = new uint8 * [960];
-		for (int i = 0; i < height; i++) {
+		for (int i = 0; i < 960; i++) {
 			tempData[i] = new uint8[1280];
 			for (int j = 0; j < 1280; j++) {
-				tempData[i][j] = (uint8)input[j * height + i];
+				tempData[i][j] = (uint8)input[j + i * 1280];
 			}
 			TIFFWriteScanline(tif, tempData[i], i);
 		}
 	}
 	else
 		cout << filename << " can not be opened!" << endl;
-
+		*/
 }
-*/
-void realWrite(const char* title, double* input , int height, const char* filename) {
+
+void realWrite(const char* title, float* input , int width, const char* filename) {
 
 	ofstream outFile;
 	outFile.open(filename);
@@ -584,35 +572,37 @@ void realWrite(const char* title, double* input , int height, const char* filena
 	outFile.setf(ios::fixed, ios::floatfield);
 	outFile.precision(7);
 	outFile << "line 0: ";
-	for (int i = 0; i < 1280; i++) {
+	for (int i = 0; i < width; i++) {
 		outFile << i << " | ";
 	}
 	outFile << endl;
-	for (int y = 0; y < height; y++) {
-		outFile << "line " << y+1 << ": ";
-		for (int x = 0; x < 960; x++) {
-			outFile << input[ y + x * height] << " | ";
+	for (int y = 0, int sum = 0; y < 960; y++) {
+		outFile << "line " << y << ": ";
+		for (int x = 0; x < width; x++) {
+			outFile << input[sum] << " | ";
+			sum++;
 		}
 		outFile << endl;
 	}
 
 }
 
-void complexWrite(const char* title, double2* input, int height, const char* filename) {
+void complexWrite(const char* title, float2* input, int width, const char* filename) {
 	ofstream outFile;
 	outFile.open(filename);
 	outFile << title << ": " << endl;
 	outFile.setf(ios::fixed, ios::floatfield);
 	outFile.precision(7);
 	outFile << "line 0: ";
-	for (int i = 0; i < 1280; i++) {
+	for (int i = 0; i < width; i++) {
 		outFile << i << "|" << i << "i"<< " | ";
 	}
 	outFile << endl;
-	for (int y = 0; y < height; y++) {
-		outFile << "line " << y+1 << ": ";
-		for (int x = 0; x < 1280; x++) {
-			outFile << input[y + x * height].x << "|" << input[y + x * height].y << "i" << " | ";
+	for (int y = 0, int sum = 0; y < 960; y++) {
+		outFile << "line " << y << ": ";
+		for (int x = 0; x < width; x++) {
+			outFile << input[sum].x << "|" << input[sum].y << "i" << " | ";
+			sum++;
 		}
 		outFile << endl;
 	}
