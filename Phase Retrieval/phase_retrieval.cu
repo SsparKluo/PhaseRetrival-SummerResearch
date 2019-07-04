@@ -286,7 +286,7 @@ int2 findMaxPoint(float* input) {
 void fourierFilterForCalib(image* calibImage) {
 	cout << "Part: fourier filter for calib image" << endl;
 	int imageSizeS = 1280 * 481;
-	int imgaeSizeL = 1280 * 960;
+	int imageSizeL = 1280 * 960;
 	dim3 blockSizeL(1, 960, 1), gridSize(1280, 1, 1), blockSizeS(1, 481, 1);
 
 	float* calibAbsImage = new float[imageSizeS];
@@ -299,17 +299,17 @@ void fourierFilterForCalib(image* calibImage) {
 	if (cudaSuccess != n)
 		cout << "cuda malloc error1!" << endl;
 	cout << n << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_calibFilteredBaseband, sizeof(float2) * calibImage->imagePixels))
+	if (cudaSuccess != cudaMalloc((void**)& dev_calibFilteredBaseband, sizeof(float2) * imageSizeL))
 		cout << "cuda malloc error2!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_calibCircFilteredFFT, sizeof(float2) * imageSizeS))
+	if (cudaSuccess != cudaMalloc((void**)& dev_calibCircFilteredFFT, sizeof(float2) * imageSizeL))
 		cout << "cuda malloc error3!" << endl;
 	if (cudaSuccess != cudaMalloc((void**)& dev_calibABSFFTShifted, sizeof(float2) * imageSizeS))
 		cout << "cuda malloc error4!" << endl;
 	if (cudaSuccess != cudaMalloc((void**)& dev_calibFFT, sizeof(float2) * imageSizeS))
 		cout << "cuda malloc error5!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_circCalibFFT, sizeof(float2) * calibImage->imagePixels))
+	if (cudaSuccess != cudaMalloc((void**)& dev_circCalibFFT, sizeof(float2) * imageSizeL))
 		cout << "cuda malloc error8!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_filteredCalibFFT, sizeof(float2) * calibImage->imagePixels))
+	if (cudaSuccess != cudaMalloc((void**)& dev_filteredCalibFFT, sizeof(float2) * imageSizeL))
 		cout << "cuda malloc error8!" << endl;
 
 	cufftHandle FFT;
@@ -349,7 +349,7 @@ void fourierFilterForCalib(image* calibImage) {
 	circShift2D <<<gridSize, blockSizeL >>> (dev_calibFFT, calibImage->fftMaxPosition, dev_circCalibFFT, imageSizeL);
 	if (cudaSuccess != cudaGetLastError())
 		printf("circle shift error!\n");
-	createFilter << <gridSize, blockSizeS >> > (80, calibImage->fftMaxPosition, dev_circCalibFFT, dev_calibCircFilteredFFT, imageSizeL);//???
+	createFilter << <gridSize, blockSizeL >> > (80, calibImage->fftMaxPosition, dev_circCalibFFT, dev_calibCircFilteredFFT, imageSizeL);//???
 	if (cudaSuccess != cudaGetLastError())
 		printf("filter create error!\n");
 	IFFTShift2D <<<gridSize, blockSizeL >>> (dev_calibCircFilteredFFT, dev_filteredCalibFFT, imageSizeL);
@@ -396,7 +396,7 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 	cout << n << endl;
 	if (cudaSuccess != cudaMalloc((void**)& dev_testFilteredBaseband, sizeof(float2) * testImage->imagePixels))
 		cout << "cuda malloc error2!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_testCircFilteredFFT, sizeof(float2) * imageSizeS))
+	if (cudaSuccess != cudaMalloc((void**)& dev_testCircFilteredFFT, sizeof(float2) * imageSizeL))
 		cout << "cuda malloc error3!" << endl; 
 	if (cudaSuccess != cudaMalloc((void**)& dev_testABSFFTShifted, sizeof(float2) * imageSizeS))
 		cout << "cuda malloc error4!" << endl;
