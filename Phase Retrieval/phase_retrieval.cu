@@ -100,7 +100,7 @@ __global__ void createFilter( int padding,  int2 maxPoint, float2* input, float2
 	int y = threadIdx.y;
 	int i = blockIdx.x * blockDim.y + threadIdx.y;
 	if (i < numElements) {
-		if ((x * x + y * y) <= padding * padding) {
+		if ((x - 640) * (x - 640) + (y - 480) * (y - 480) <= padding * padding) {
 			output[i].x = input[i].x;
 			output[i].y = input[i].y;
 		}
@@ -119,17 +119,17 @@ __global__ void FFTShift2D( cufftComplex* input, cufftComplex* output, int numEl
 	if (i < numElements) {
 		if (y >= 480) {
 			if (x >= half) {
-				output[y + (x - half) * blockDim.y].x = input[y - 480 + x * blockDim.y].x;
-				output[y + (x - half) * blockDim.y].y = input[y - 480 + x * blockDim.y].y;
+				output[y + (x - half) * blockDim.y].x = input[y - 480 + x * 481].x;
+				output[y + (x - half) * blockDim.y].y = input[y - 480 + x * 481].y;
 			}
 			else {
-				output[y + (x + half) * blockDim.y].x = input[y - 480 + x * blockDim.y].x;
-				output[y + (x + half) * blockDim.y].y = input[y - 480 + x * blockDim.y].y;
+				output[y + (x + half) * blockDim.y].x = input[y - 480 + x * 481].x;
+				output[y + (x + half) * blockDim.y].y = input[y - 480 + x * 481].y;
 			}
 		}
 		else {
-			output[y + x * blockDim.y].x = input[y + 1 * blockDim.y * x].x;
-			output[y + x * blockDim.y].y = input[y + 1 * blockDim.y * x].y;
+			output[y + x * blockDim.y].x = input[y + 1 + 481 * x].x;
+			output[y + x * blockDim.y].y = input[y + 1 + 481 * x].y;
 		}
 	}
 }
@@ -292,12 +292,12 @@ bool getImageInfo( image* targetImage ) {
 int2 findMaxPoint(float* input) {
 	int2 tempPoint = {0,0};
 	float tempMax = 0;
-	for (int i = 0; i < 481; i++) {
+	for (int i = 0; i < 960; i++) {
 		for (int j = 0; j < 1280; j++) {
-			if (j > 600 && j < 680)
+			if (j < 680)
 				continue;
-			if (input[i + j * 481] > tempMax) {
-				tempMax = input[i + j * 481];
+			if (input[i + j * 960] > tempMax) {
+				tempMax = input[i + j * 960];
 				tempPoint.y = i;
 				tempPoint.x = j;
 			}
@@ -312,7 +312,7 @@ void fourierFilterForCalib(image* calibImage) {
 	int imageSizeL = 1280 * 960;
 	dim3 blockSizeL(1, 960, 1), gridSize(1280, 1, 1), blockSizeS(1, 481, 1);
 
-	float* calibAbsImage = new float[imageSizeS];
+	float* calibAbsImage = new float[imageSizeL];
 
 	realWrite("input for fourierFiltered", calibImage->imageData, 960, "../Debug/input_FF.csv");
 
@@ -326,7 +326,7 @@ void fourierFilterForCalib(image* calibImage) {
 		cout << "cuda malloc error2!" << endl;
 	if (cudaSuccess != cudaMalloc((void**)& dev_calibCircFilteredFFT, sizeof(float2) * imageSizeL))
 		cout << "cuda malloc error3!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_calibABSFFTShifted, sizeof(float2) * imageSizeS))
+	if (cudaSuccess != cudaMalloc((void**)& dev_calibABSFFTShifted, sizeof(float) * imageSizeL))
 		cout << "cuda malloc error4!" << endl;
 	if (cudaSuccess != cudaMalloc((void**)& dev_calibFFT, sizeof(float2) * imageSizeS))
 		cout << "cuda malloc error5!" << endl;
@@ -357,39 +357,46 @@ void fourierFilterForCalib(image* calibImage) {
 	if (cudaSuccess != cudaGetLastError())
 		printf("FFTShift error!\n");
 	
-	getAbsOfComplexMatric <<< gridSize, blockSizeS >>> (dev_calibFFTShifted, dev_calibABSFFTShifted, imageSizeS);
+	getAbsOfComplexMatric <<< gridSize, blockSizeL >>> (dev_calibFFTShifted, dev_calibABSFFTShifted, imageSizeL);
 	if (cudaSuccess != cudaGetLastError())
 		printf("get abs error!\n");
 
-
-	int b = cudaMemcpy(calibAbsImage, dev_calibABSFFTShifted, imageSizeS * sizeof(cufftReal), cudaMemcpyDeviceToHost);
+	int b = cudaMemcpy(calibAbsImage, dev_calibABSFFTShifted, imageSizeL * sizeof(cufftReal), cudaMemcpyDeviceToHost);
 	if (cudaSuccess != b)
 		cout << "cuda memory cpy error!" << endl;
 	cout << b << endl;
-
-	realWrite("calib abs image", calibAbsImage, 481, "../Debug/calib_abs_image.csv");
+	realWrite("calib abs image", calibAbsImage, 960, "../Debug/calib_abs_image.csv");
 
 	calibImage->fftMaxPosition = findMaxPoint(calibAbsImage);
 	cout << "Xmax= " << calibImage->fftMaxPosition.x << ", Ymax= " << calibImage->fftMaxPosition.y << endl;
 
-	float2* circfft = new float2[imageSizeL];
-	circShift2D <<<gridSize, blockSizeL >>> (dev_calibFFT, calibImage->fftMaxPosition, dev_circCalibFFT, imageSizeL);
-	if (cudaSuccess != cudaMemcpy(circfft, dev_circCalibFFT, imageSizeL * sizeof(cufftComplex), cudaMemcpyDeviceToHost))
-		cout << "cuda memory cpy error!" << endl;
-	complexWrite("fft after circshift", circfft, 960, "../Debug/circFFT.csv");
+	float2* tempComplex = new float2[imageSizeL];
+	circShift2D <<<gridSize, blockSizeL >>> (dev_calibFFTShifted, calibImage->fftMaxPosition, dev_circCalibFFT, imageSizeL);
 
 	if (cudaSuccess != cudaGetLastError())
 		printf("circle shift error!\n");
-	createFilter << <gridSize, blockSizeL >> > (80, calibImage->fftMaxPosition, dev_circCalibFFT, dev_calibCircFilteredFFT, imageSizeL);//???
+	if (cudaSuccess != cudaMemcpy(tempComplex, dev_circCalibFFT, imageSizeL * sizeof(cufftComplex), cudaMemcpyDeviceToHost))
+		cout << "cuda memory cpy error!" << endl;
+	complexWrite("fft after circshift", tempComplex, 960, "../Debug/circFFT.csv");
+
+	createFilter <<<gridSize, blockSizeL >>> (80, calibImage->fftMaxPosition, dev_circCalibFFT, dev_calibCircFilteredFFT, imageSizeL);//???
 	if (cudaSuccess != cudaGetLastError())
 		printf("filter create error!\n");
+	if (cudaSuccess != cudaMemcpy(tempComplex, dev_calibCircFilteredFFT, imageSizeL * sizeof(cufftComplex), cudaMemcpyDeviceToHost))
+		cout << "cuda memory cpy error!" << endl;
+	complexWrite("fft after circshift", tempComplex, 960, "../Debug/calib_filtered.csv");
+
 	IFFTShift2D <<<gridSize, blockSizeL >>> (dev_calibCircFilteredFFT, dev_filteredCalibFFT, imageSizeL);
 	if (cudaSuccess != cudaGetLastError())
 		printf("IFFT shift error!\n");
+	if (cudaSuccess != cudaMemcpy(tempComplex, dev_filteredCalibFFT, imageSizeL * sizeof(cufftComplex), cudaMemcpyDeviceToHost))
+		cout << "cuda memory cpy error!" << endl;
+	complexWrite("fft after circshift", tempComplex, 960, "../Debug/ifft_shifted.csv");
+
 	cufftExecC2C(IFFT, dev_filteredCalibFFT, dev_calibFilteredBaseband,CUFFT_INVERSE);
 	cudaThreadSynchronize();
 	
-	if (cudaSuccess != cudaMemcpy(calibImage->filteredBaseband, dev_calibFilteredBaseband, (calibImage->imagePixels ) * sizeof(float), cudaMemcpyDeviceToHost))
+	if (cudaSuccess != cudaMemcpy(calibImage->filteredBaseband, dev_calibFilteredBaseband, (calibImage->imagePixels ) * sizeof(float2), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error!" << endl;
 
 	complexWrite("calib filtered baseband", calibImage->filteredBaseband, 960, "../Debug/calib_filtered_baseband.csv");
