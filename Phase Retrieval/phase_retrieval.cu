@@ -35,7 +35,7 @@ public:
 		for (int i = 0; i < 960; i++) {
 			rawImage[i] = (uint8*)malloc(sizeof(uint8) * 1280);
 		}
-		filteredBaseband =(float2*)malloc(sizeof(float)*2*1280*960);
+		filteredBaseband =(float2*)malloc(sizeof(float2)*1280*960);
 		imageFilter = new float[960 * 1280];
 	}
 };
@@ -148,24 +148,24 @@ __global__ void IFFTShift2D( cufftComplex* input, cufftComplex* output, int numE
 	int halfX = gridDim.x / 2;
 	int preX, preY;
 	if (i < numElements) {
-		if (y >= halfY) {
-			if (x >= halfX) {
-				output[y - halfY + x * blockDim.y].x = input[y + (x - halfX) * blockDim.y].x;
-				output[y - halfY + x * blockDim.y].y = input[y + (x - halfX) * blockDim.y].y;
+		if (y < halfY) {
+			if (x < halfX) {
+				output[i].x = input[(x + halfX) * blockDim.y + y + halfY].x;
+				output[i].y = input[(x + halfX) * blockDim.y + y + halfY].y;
 			}
 			else {
-				output[y - halfY + x * blockDim.y].x = input[y + (x + halfX) * blockDim.y].x;
-				output[y - halfY + x * blockDim.y].y = input[y + (x + halfX) * blockDim.y].y;
+				output[i].x = input[(x - halfX) * blockDim.y + y + halfY].x;
+				output[i].y = input[(x - halfX) * blockDim.y + y + halfY].y;
 			}
 		}
 		else {
-			if (x >= halfX) {
-				output[480 - y + 481 * (1280 - x + 640)].x = input[y + x * blockDim.y].x;
-				output[480 - y + 481 * (1280 - x + 640)].y = input[y + x * blockDim.y].y;
+			if (x < halfX) {
+				output[i].x = input[(x + halfX) * blockDim.y + y - halfY].x;
+				output[i].y = input[(x + halfX) * blockDim.y + y - halfY].y;
 			}
 			else {
-				output[480 - y + 481 * (1280 - x + 640)].x = input[y + x * blockDim.y].x;
-				output[480 - y + 481 * (1280 - x + 640)].y = input[y + x * blockDim.y].y;
+				output[i].x = input[(x - halfX) * blockDim.y + y - halfY].x;
+				output[i].y = input[(x - halfX) * blockDim.y + y - halfY].y;
 			}
 		}
 	}
@@ -175,8 +175,8 @@ __global__ void circShift2D( cufftComplex* input,  int2 maxPoint, cufftComplex* 
 	int x = blockIdx.x;
 	int y = threadIdx.y;
 	int i = blockIdx.x * blockDim.y + threadIdx.y;
-	int preX = x - 640 + maxPoint.x;
-	int preY = y - 480 + maxPoint.y;
+	int preX = x - 639 + maxPoint.x;
+	int preY = y - 479 + maxPoint.y;
 	if (i < numElements) {
 		/*
 		if (preX < 0)
@@ -413,9 +413,8 @@ void fourierFilterForCalib(image* calibImage) {
 		cout << "cuda memory cpy error!" << endl;
 	complexWrite("fft after circshift", tempComplex, 960, "../Debug/ifft_shifted.csv");
 
-	cufftExecC2C(IFFT, dev_filteredCalibFFT, dev_calibFilteredBaseband,CUFFT_INVERSE);
-	cudaThreadSynchronize();
-	
+	cufftExecC2C(IFFT, dev_filteredCalibFFT, dev_calibFilteredBaseband, CUFFT_INVERSE);
+		
 	if (cudaSuccess != cudaMemcpy(calibImage->filteredBaseband, dev_calibFilteredBaseband, (calibImage->imagePixels ) * sizeof(float2), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error!" << endl;
 
