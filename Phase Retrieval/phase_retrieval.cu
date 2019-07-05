@@ -128,8 +128,8 @@ __global__ void FFTShift2D( cufftComplex* input, cufftComplex* output, int numEl
 			}
 		}
 		else {
-			output[y + x * blockDim.y].x = input[y + 1 + 481 * x].x;
-			output[y + x * blockDim.y].y = input[y + 1 + 481 * x].y;
+			output[y + x * blockDim.y].x = input[480 - y + 481 * x].x;
+			output[y + x * blockDim.y].y = input[480 - y + 481 * x].y;
 		}
 	}
 }
