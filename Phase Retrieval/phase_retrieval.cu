@@ -150,12 +150,12 @@ __global__ void IFFTShift2D( cufftComplex* input, cufftComplex* output, int numE
 	if (i < numElements) {
 		if (y >= halfY) {
 			if (x >= halfX) {
-				output[y + x * blockDim.y].x = input[y + (x - halfX) * blockDim.y].x;
-				output[y + x * blockDim.y].y = input[y + (x - halfX) * blockDim.y].y;
+				output[y - halfY + x * blockDim.y].x = input[y + (x - halfX) * blockDim.y].x;
+				output[y - halfY + x * blockDim.y].y = input[y + (x - halfX) * blockDim.y].y;
 			}
 			else {
-				output[y + x * blockDim.y].x = input[y + (x + halfX) * blockDim.y].x;
-				output[y + x * blockDim.y].y = input[y + (x + halfX) * blockDim.y].y;
+				output[y - halfY + x * blockDim.y].x = input[y + (x + halfX) * blockDim.y].x;
+				output[y - halfY + x * blockDim.y].y = input[y + (x + halfX) * blockDim.y].y;
 			}
 		}
 		else {
