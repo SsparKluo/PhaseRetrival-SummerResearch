@@ -343,7 +343,7 @@ void fourierFilterForCalib(image* calibImage) {
 
 	complexWrite("input for fourierFiltered", calibImage->imageData, 960, "../Debug/input_FF.csv");
 
-	cufftReal* dev_calibABSFFTShifted;
+	cufftReal * dev_calibABSFFTShifted;
 	cufftComplex* dev_calibFFT, * dev_circCalibFFT, * dev_calibFilteredBaseband, * dev_calibCircFilteredFFT, * dev_filteredCalibFFT, * dev_calibFFTShifted, * dev_calibImage;
 	int n = cudaMalloc((void**)& dev_calibImage, sizeof(float2) * calibImage->imagePixels);
 	if (cudaSuccess != n)
@@ -423,7 +423,7 @@ void fourierFilterForCalib(image* calibImage) {
 	complexWrite("fft after circshift", tempComplex, 960, "../Debug/ifft_shifted.csv");
 
 	cufftExecC2C(FFT, dev_filteredCalibFFT, dev_calibFilteredBaseband, CUFFT_INVERSE);
-	vectorNumdivide << <gridSize, blockSizeL >> > (dev_calibFilteredBaseband, imageSizeL, imageSizeL);
+	vectorNumdivide<<<gridSize,blockSizeL>>>(dev_calibFilteredBaseband, imageSizeL, imageSizeL);
 	if (cudaSuccess != cudaMemcpy(calibImage->filteredBaseband, dev_calibFilteredBaseband, (calibImage->imagePixels) * sizeof(float2), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error!" << endl;
 
@@ -455,8 +455,8 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 	float2* tempComplex = new float2[imageSizeL];
 	float* testAbsImage = (float*)malloc(sizeof(float) * imageSizeL);
 
-	cufftReal* dev_testABSFFTShifted;
-	cufftComplex* dev_testFFT, * dev_circTestFFT, * dev_testFilteredBaseband, * dev_testCircFilteredFFT, * dev_filteredTestFFT, * dev_testFFTShifted, * dev_testImage;
+	cufftReal * dev_testABSFFTShifted;
+	cufftComplex* dev_testFFT, * dev_circTestFFT, * dev_testFilteredBaseband, * dev_testCircFilteredFFT, * dev_filteredTestFFT, * dev_testFFTShifted , * dev_testImage;
 	int n = cudaMalloc((void**)& dev_testImage, sizeof(float2) * testImage->imagePixels);
 	if (cudaSuccess != n)
 		cout << "cuda malloc error1!" << endl;
