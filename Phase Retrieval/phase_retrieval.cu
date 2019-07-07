@@ -336,12 +336,21 @@ int2 findMaxPoint(float* input) {
 
 void fourierFilterForCalib(image* calibImage) {
 	cout << "Part: fourier filter for calib image" << endl;
+
+
+	cudaEvent_t FFStart;
+	cudaEventCreate(&FFStart);
+	cudaEvent_t FFStop;
+	cudaEventCreate(&FFStop);
+	cudaEventRecord(FFStart, NULL);
+
+
 	int imageSizeL = 1280 * 960;
 	dim3 blockSizeL(1, 960, 1), gridSize(1280, 1, 1);
 	float2* tempComplex = new float2[imageSizeL];
 	float* calibAbsImage = new float[imageSizeL];
 
-	complexWrite("input for fourierFiltered", calibImage->imageData, 960, "../Debug/input_FF.csv");
+	//complexWrite("input for fourierFiltered", calibImage->imageData, 960, "../Debug/input_FF.csv");
 
 	cufftReal* dev_calibABSFFTShifted;
 	cufftComplex* dev_calibFFT, * dev_circCalibFFT, * dev_calibFilteredBaseband, * dev_calibCircFilteredFFT, * dev_filteredCalibFFT, * dev_calibFFTShifted, * dev_calibImage;
@@ -370,64 +379,102 @@ void fourierFilterForCalib(image* calibImage) {
 	if (cudaSuccess != cudaMemcpy(dev_calibImage, calibImage->imageData, calibImage->imagePixels * sizeof(cufftComplex), cudaMemcpyHostToDevice))
 		cout << "cuda memory cpy error!" << endl;
 
+	cudaEvent_t fftStart;
+	cudaEventCreate(&fftStart);
+	cudaEvent_t fftStop;
+	cudaEventCreate(&fftStop);
+	cudaEventRecord(fftStart, NULL);
+
 	errorHandle(cufftExecC2C(FFT, dev_calibImage, dev_calibFFT, CUFFT_FORWARD));
+
+	cudaEventRecord(fftStop, NULL);
+	cudaEventSynchronize(fftStop);
+	float msecFFT = 0.0f;
+	cudaEventElapsedTime(&msecFFT, fftStart, fftStop);
+	cout << "total runtime of FFT: " << msecFFT << " ms" << endl;
+
 	float2* tempOut = (float2*)malloc(sizeof(float2) * 1280 * 960);
 	int a = cudaMemcpy((void*)tempOut, (void*)dev_calibFFT, imageSizeL * sizeof(cufftComplex), cudaMemcpyDeviceToHost);
-	if (cudaSuccess != a)
-		cout << "cuda memory cpy error!" << endl;
-	cout << a << endl;
-	complexWrite("temp dubug info", tempOut, 960, "../Debug/calib_FFT.csv");
+//	if (cudaSuccess != a)
+//		cout << "cuda memory cpy error!" << endl;
+//	cout << a << endl;
+//	complexWrite("temp dubug info", tempOut, 960, "../Debug/calib_FFT.csv");
+
+	cudaEvent_t fftShiftStart;
+	cudaEventCreate(&fftShiftStart);
+	cudaEvent_t fftShiftStop;
+	cudaEventCreate(&fftShiftStop);
+	cudaEventRecord(fftShiftStart, NULL);
 
 	FFTShift2D << < gridSize, blockSizeL >> > (dev_calibFFT, dev_calibFFTShifted, imageSizeL);
-	if (cudaSuccess != cudaGetLastError())
-		printf("FFTShift error!\n");
+
+	cudaEventRecord(fftShiftStop, NULL);
+	cudaEventSynchronize(fftShiftStop);
+	float msecFFTShift = 0.0f;
+	cudaEventElapsedTime(&msecFFTShift, fftShiftStart, fftShiftStop);
+	cout << "total runtime of FFT: " << msecFFTShift << " ms" << endl;
+
+//	if (cudaSuccess != cudaGetLastError())
+//		printf("FFTShift error!\n");
 	if (cudaSuccess != cudaMemcpy(tempComplex, dev_calibFFTShifted, imageSizeL * sizeof(cufftComplex), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error!" << endl;
-	complexWrite("fft after shift", tempComplex, 960, "../Debug/calib_FFT_Shifted.csv");
+//	complexWrite("fft after shift", tempComplex, 960, "../Debug/calib_FFT_Shifted.csv");
 
 
 	getAbsOfComplexMatric << < gridSize, blockSizeL >> > (dev_calibFFTShifted, dev_calibABSFFTShifted, imageSizeL);
-	if (cudaSuccess != cudaGetLastError())
-		printf("get abs error!\n");
+//	if (cudaSuccess != cudaGetLastError())
+//		printf("get abs error!\n");
 
 	int b = cudaMemcpy(calibAbsImage, dev_calibABSFFTShifted, imageSizeL * sizeof(cufftReal), cudaMemcpyDeviceToHost);
-	if (cudaSuccess != b)
-		cout << "cuda memory cpy error!" << endl;
-	cout << b << endl;
-	realWrite("calib abs image", calibAbsImage, 960, "../Debug/calib_abs_image.csv");
+//	if (cudaSuccess != b)
+//		cout << "cuda memory cpy error!" << endl;
+//	cout << b << endl;
+//	realWrite("calib abs image", calibAbsImage, 960, "../Debug/calib_abs_image.csv");
 
 	calibImage->fftMaxPosition = findMaxPoint(calibAbsImage);
-	cout << "Xmax= " << calibImage->fftMaxPosition.x << ", Ymax= " << calibImage->fftMaxPosition.y << endl;
+//	cout << "Xmax= " << calibImage->fftMaxPosition.x << ", Ymax= " << calibImage->fftMaxPosition.y << endl;
 
+	cudaEvent_t filterStart;
+	cudaEventCreate(&filterStart);
+	cudaEvent_t filterStop;
+	cudaEventCreate(&filterStop);
+	cudaEventRecord(filterStart, NULL);
 
 	circShift2D << <gridSize, blockSizeL >> > (dev_calibFFTShifted, calibImage->fftMaxPosition, dev_circCalibFFT, imageSizeL);
 
-	if (cudaSuccess != cudaGetLastError())
-		printf("circle shift error!\n");
+//	if (cudaSuccess != cudaGetLastError())
+//		printf("circle shift error!\n");
 	if (cudaSuccess != cudaMemcpy(tempComplex, dev_circCalibFFT, imageSizeL * sizeof(cufftComplex), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error!" << endl;
-	complexWrite("fft after circshift", tempComplex, 960, "../Debug/circFFT.csv");
+//	complexWrite("fft after circshift", tempComplex, 960, "../Debug/circFFT.csv");
 
-	createFilter << <gridSize, blockSizeL >> > (80, calibImage->fftMaxPosition, dev_circCalibFFT, dev_calibCircFilteredFFT, imageSizeL);//???
-	if (cudaSuccess != cudaGetLastError())
-		printf("filter create error!\n");
+	createFilter << <gridSize, blockSizeL >> > (80, calibImage->fftMaxPosition, dev_circCalibFFT, dev_calibCircFilteredFFT, imageSizeL);
+
+	cudaEventRecord(filterStop, NULL);
+	cudaEventSynchronize(filterStop);
+	float msecFilter = 0.0f;
+	cudaEventElapsedTime(&msecFilter, filterStart, filterStop);
+	cout << "total runtime of creating filter: " << msecFilter << " ms" << endl;
+
+//	if (cudaSuccess != cudaGetLastError())
+//		printf("filter create error!\n");
 	if (cudaSuccess != cudaMemcpy(tempComplex, dev_calibCircFilteredFFT, imageSizeL * sizeof(cufftComplex), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error!" << endl;
-	complexWrite("fft after circshift", tempComplex, 960, "../Debug/calib_filtered.csv");
+//	complexWrite("fft after circshift", tempComplex, 960, "../Debug/calib_filtered.csv");
 
 	IFFTShift2D << <gridSize, blockSizeL >> > (dev_calibCircFilteredFFT, dev_filteredCalibFFT, imageSizeL);
 	if (cudaSuccess != cudaGetLastError())
 		printf("IFFT shift error!\n");
 	if (cudaSuccess != cudaMemcpy(tempComplex, dev_filteredCalibFFT, imageSizeL * sizeof(cufftComplex), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error!" << endl;
-	complexWrite("fft after circshift", tempComplex, 960, "../Debug/ifft_shifted.csv");
+//	complexWrite("fft after circshift", tempComplex, 960, "../Debug/ifft_shifted.csv");
 
 	cufftExecC2C(FFT, dev_filteredCalibFFT, dev_calibFilteredBaseband, CUFFT_INVERSE);
 	vectorNumdivide << <gridSize, blockSizeL >> > (dev_calibFilteredBaseband, imageSizeL, imageSizeL);
 	if (cudaSuccess != cudaMemcpy(calibImage->filteredBaseband, dev_calibFilteredBaseband, (calibImage->imagePixels) * sizeof(float2), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error!" << endl;
 
-	complexWrite("calib filtered baseband", calibImage->filteredBaseband, 960, "../Debug/calib_filtered_baseband.csv");
+//	complexWrite("calib filtered baseband", calibImage->filteredBaseband, 960, "../Debug/calib_filtered_baseband.csv");
 
 	if (cudaSuccess != cudaFree(dev_calibImage))
 		cout << "cude memory free error!" << endl;
@@ -445,6 +492,13 @@ void fourierFilterForCalib(image* calibImage) {
 		cout << "cude memory free error!" << endl;
 	if (cudaSuccess != cudaFree(dev_calibFFTShifted))
 		cout << "cude memory free error!" << endl;
+
+
+	cudaEventRecord(FFStop, NULL);
+	cudaEventSynchronize(FFStop);
+	float msecTotal = 0.0f;
+	cudaEventElapsedTime(&msecTotal, FFStart, FFStop);
+	cout << "total runtime of part fourier filter: " << msecTotal << " ms" << endl;
 }
 
 float* phaseRetrieval(image* calibImage, image* testImage) {
@@ -458,9 +512,9 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 	cufftReal* dev_testABSFFTShifted;
 	cufftComplex* dev_testFFT, * dev_circTestFFT, * dev_testFilteredBaseband, * dev_testCircFilteredFFT, * dev_filteredTestFFT, * dev_testFFTShifted, * dev_testImage;
 	int n = cudaMalloc((void**)& dev_testImage, sizeof(float2) * testImage->imagePixels);
-	if (cudaSuccess != n)
-		cout << "cuda malloc error1!" << endl;
-	cout << n << endl;
+//	if (cudaSuccess != n)
+//		cout << "cuda malloc error1!" << endl;
+//	cout << n << endl;
 	if (cudaSuccess != cudaMalloc((void**)& dev_testFilteredBaseband, sizeof(float2) * testImage->imagePixels))
 		cout << "cuda malloc error2!" << endl;
 	if (cudaSuccess != cudaMalloc((void**)& dev_testCircFilteredFFT, sizeof(float2) * imageSizeL))
@@ -484,15 +538,15 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 
 	errorHandle(cufftExecC2C(FFT, dev_testImage, dev_testFFT, CUFFT_FORWARD));
 	FFTShift2D << < gridSize, blockSizeL >> > (dev_testFFT, dev_testFFTShifted, imageSizeL);
-	if (cudaSuccess != cudaGetLastError())
-		printf("FFT shift Error!\n");
+//	if (cudaSuccess != cudaGetLastError())
+//		printf("FFT shift Error!\n");
 
 	circShift2D << <gridSize, blockSizeL >> > (dev_testFFTShifted, calibImage->fftMaxPosition, dev_circTestFFT, imageSizeL);
-	if (cudaSuccess != cudaGetLastError())
-		printf("circ shift Error!\n");
+//	if (cudaSuccess != cudaGetLastError())
+//		printf("circ shift Error!\n");
 	createFilter << <gridSize, blockSizeL >> > (80, calibImage->fftMaxPosition, dev_circTestFFT, dev_testCircFilteredFFT, imageSizeL);
-	if (cudaSuccess != cudaGetLastError())
-		printf("filter create Error!\n");
+//	if (cudaSuccess != cudaGetLastError())
+//		printf("filter create Error!\n");
 	IFFTShift2D << <gridSize, blockSizeL >> > (dev_testCircFilteredFFT, dev_filteredTestFFT, imageSizeL);
 	if (cudaSuccess != cudaGetLastError())
 		printf("IFFT shift Error!\n");
@@ -500,7 +554,7 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 	vectorNumdivide << <gridSize, blockSizeL >> > (dev_testFilteredBaseband, imageSizeL, imageSizeL);
 	if (cudaSuccess != cudaMemcpy(testImage->filteredBaseband, dev_testFilteredBaseband, (testImage->imagePixels) * sizeof(float2), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error" << endl;
-	complexWrite("test filtered baseband", testImage->filteredBaseband, 960, "../Debug/test_filtered_baseband.csv");
+//	complexWrite("test filtered baseband", testImage->filteredBaseband, 960, "../Debug/test_filtered_baseband.csv");
 
 	if (cudaSuccess != cudaFree(dev_testImage))
 		cout << "cude memory free error!" << endl;
@@ -508,7 +562,6 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 		cout << "cude memory free error!" << endl;
 	if (cudaSuccess != cudaFree(dev_circTestFFT))
 		cout << "cude memory free error!" << endl;
-
 	if (cudaSuccess != cudaFree(dev_testFFT))
 		cout << "cude memory free error!" << endl;
 	if (cudaSuccess != cudaFree(dev_filteredTestFFT))
@@ -519,7 +572,7 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 		cout << "cude memory free error!" << endl;
 
 	float* phaseImage = (float*)malloc(sizeof(float) * imageSizeL);
-
+	/*
 	cufftReal* dev_phaseImage;
 	cufftComplex* dev_calibFilteredBaseband, * dev_finalImage;
 	if (cudaSuccess != cudaMalloc((void**)& dev_phaseImage, sizeof(float) * imageSizeL))
@@ -540,7 +593,7 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 	if (cudaSuccess != cudaMemcpy(phaseImage, dev_phaseImage, imageSizeL * sizeof(float), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error!" << endl;
 	realWrite("phase image", phaseImage, 960, "../Debug/phase_image1.csv");
-	/*
+	
 	if (!myUnwrapInitialize()) {
 		cout << "matlab unwrap function initialize error" << endl;
 	}
@@ -551,7 +604,7 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 	matlabOutput.GetData(phaseImage, 960 * 1280);
 	//别忘了调整matlab\extern的地址
 	realWrite("phase image after unwrapping", phaseImage, 1280, "..\ouput_text\phase_image2.csv");
-	*/
+	
 	if (cudaSuccess != cudaMemcpy(dev_phaseImage, phaseImage, testImage->imagePixels * sizeof(float), cudaMemcpyHostToDevice))
 		cout << "cuda memory cpy error!" << endl;
 
@@ -583,7 +636,7 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 	cudaThreadSynchronize();
 	if (cudaSuccess != cudaMemcpy(phaseImage, dev_phaseImage, testImage->imagePixels * sizeof(float), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error!" << endl;
-	//
+	
 	float* height1 = (float*)malloc(sizeof(float) * testImage->imagePixels);
 	cufftReal* dev_height;
 	cudaMalloc((void**)& dev_height, sizeof(float) * testImage->imagePixels);
@@ -607,8 +660,10 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 
 	cudaFree(dev_output);
 	cudaFree(dev_height);
-
-	return height1;
+	*/
+	//return height1;
+	float* a;
+	return a;
 }
 
 void imageFileWrite(float* input, char* filename) {
@@ -680,3 +735,16 @@ void errorHandle(int input) {
 		cout << "Success" << endl;
 	}
 }
+
+/*
+cudaEvent_t start1;
+cudaEventCreate(&start1);
+cudaEvent_t stop1;
+cudaEventCreate(&stop1);
+cudaEventRecord(start1, NULL);
+// 需要测时间的内核函数kernel;
+cudaEventRecord(stop1, NULL);
+cudaEventSynchronize(stop1);
+float msecTotal1 = 0.0f;
+cudaEventElapsedTime(&msecTotal1, start1, stop1);
+*/
