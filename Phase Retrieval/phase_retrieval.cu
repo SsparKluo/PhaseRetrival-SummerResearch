@@ -563,6 +563,12 @@ void fourierFilterForCalib(image* calibImage) {
 	cudaEventCreate(&absStop);
 	cudaEventRecord(absStart, NULL);
 
+	cudaEvent_t absStart;
+	cudaEventCreate(&absStart);
+	cudaEvent_t absStop;
+	cudaEventCreate(&absStop);
+	cudaEventRecord(absStart, NULL);
+
 	getAbsOfComplexMatric << < gridSize, blockSizeL >> > (dev_calibFFTShifted, dev_calibABSFFTShifted, imageSizeL);
 
 
