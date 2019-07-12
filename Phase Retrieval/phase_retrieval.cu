@@ -1,7 +1,6 @@
 #include<iostream>
 #include<fstream>
 #include"tiffio.h"
-#include<cmath>
 #include<algorithm>
 #include"FT_kernel.cuh"
 #include "cuda_runtime.h"
@@ -10,6 +9,7 @@
 #include<cuda.h>
 #include"myUnwrap.h"
 #include"matrix.h"
+#include<math.h>
 
 
 #define lambda 0.632
@@ -50,7 +50,7 @@ void imageFileWrite(float* input, char* filename);
 void complexWrite(const char* title, float2* input, int width, const char* filename);
 void realWrite(const char* title, float* input, int width, const char* filename);
 void errorHandle(int input);
-float* phaseUnwrapping(float* wMatrix);
+void phaseUnwrapping(float* wMatrix, float* result);
 
 __global__ void vectorAdd(float* a, float* b, float* c, int numElements) {
 	int x = blockIdx.x;
@@ -265,11 +265,11 @@ __global__ void calOutputImage(cufftReal* input, float* output, int numElements)
 __global__ void matrixMultiple(float* output, float* matrixL, float* matrixR , int size ,int numElements) {
 	int i = (blockIdx.x * blockDim.x + threadIdx.x) * (blockDim.y * gridDim.y) + (threadIdx.y + blockIdx.y * blockDim.y);
 	int x = blockDim.x * blockIdx.x + threadIdx.x;
-	int y = blockDim.y * blockDim.y + threadIdx.y;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
 	if (i < numElements) {
 		float data;
 		for (int a = 0; a < size; a++) {
-			data += matrixL[a * size + y] * matrixR[a + x * size];
+			data = data + matrixL[a * size + y] * matrixR[a + x * size];
 		}
 		output[i] = data;
 	}
@@ -278,28 +278,22 @@ __global__ void matrixMultiple(float* output, float* matrixL, float* matrixR , i
 __global__ void DCTMatrixL(int height, float* DCTMatrixL) {
 	int i = (blockIdx.x * blockDim.x + threadIdx.x) * (blockDim.y * gridDim.y) + (threadIdx.y + blockIdx.y * blockDim.y);
 	int x = blockDim.x * blockIdx.x + threadIdx.x;
-	int y = blockDim.y * blockDim.y + threadIdx.y;
-	DCTMatrixL[i] = cospi((2 * x + 1) * y / 2 * height);
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+	DCTMatrixL[i] = cospi((float)(2 * x + 1) * y / 2 * height);
 }
 
 __global__ void DCTMatrixR(int width, float* DCTMatrixR) {
 	int i = (blockIdx.x * blockDim.x + threadIdx.x) * (blockDim.y * gridDim.y) + (threadIdx.y + blockIdx.y * blockDim.y);
 	int x = blockDim.x * blockIdx.x + threadIdx.x;
-	int y = blockDim.y * blockDim.y + threadIdx.y;
-	DCTMatrixR[i] = cospi((2 * y + 1) * x / 2 * width);
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+	DCTMatrixR[i] = cospi((float)(2 * y + 1) * x / 2 * width);
 }
 
-__global__ void matrixModify(float* input ,int width, int height) {
-	int i = (blockIdx.x * blockDim.x + threadIdx.x) * (blockDim.y * gridDim.y) + (threadIdx.y + blockIdx.y * blockDim.y);
-	int x = blockDim.x * blockIdx.x + threadIdx.x;
-	int y = blockDim.y * blockDim.y + threadIdx.y;
-	input[i] = input[i] / (2 * (cospi(x / width) + cospi(y / height) - 2));
-}
 
 __global__ void matrixModify(float* input, int width, int height) {
 	int i = (blockIdx.x * blockDim.x + threadIdx.x) * (blockDim.y * gridDim.y) + (threadIdx.y + blockIdx.y * blockDim.y);
 	int x = blockDim.x * blockIdx.x + threadIdx.x;
-	int y = blockDim.y * blockDim.y + threadIdx.y;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
 	input[i] = input[i] / (2 * (cospi((float)x / width) + cospi((float)y / height) - 2));
 	if (x == 0)
 		if (y == 0)
@@ -313,33 +307,18 @@ __global__ void matrixModify(float* input, int width, int height) {
 			input[i] = input[i] * 2 / (height * width);
 }
 
-__global__ normalizer(float* input , int height , int width) {
-	int i = (blockIdx.x * blockDim.x + threadIdx.x) * (blockDim.y * gridDim.y) + (threadIdx.y + blockIdx.y * blockDim.y);
-	int x = blockDim.x * blockIdx.x + threadIdx.x;
-	int y = blockDim.y * blockDim.y + threadIdx.y;
-	if (x == 0)
-		if (y == 0)
-			input[i] = input[i] * sqrt((float)1 / (height * width));
-		else
-			input[i] = input[i] * sqrt((float)2 / (height * width));
-	else
-		if (y == 0)
-			input[i] = input[i] / sqrt((float)height * width);
-		else
-			input[i] = input[i] * sqrt((float)2 / (height * width));
-}
 
 __global__ void gradCal(float* input, float* output, int height, int width) {
 	int i = (blockIdx.x * blockDim.x + threadIdx.x) * (blockDim.y * gridDim.y) + (threadIdx.y + blockIdx.y * blockDim.y);
 	int x = blockDim.x * blockIdx.x + threadIdx.x;
-	int y = blockDim.y * blockDim.y + threadIdx.y;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
 	if (x < width - 1 && y < height - 1 && x > 0 && y > 0) {
 		output[i] = input[i + height] + input[i - height] - 4 * input[i] + input[i + 1] + input[i - 1];
 	}
 	else if (x == 0) {
 		if (y == 0)
 			output[i] = input[i + height] - 4 * input[i] + input[i + 1];
-		else if (y == width - 1)
+		else if (y == height - 1)
 			output[i] = input[i + height] - 4 * input[i] + input[i - 1];
 		else
 			output[i] = input[i + height] - 4 * input[i] + input[i + 1] + input[i - 1];
@@ -347,7 +326,7 @@ __global__ void gradCal(float* input, float* output, int height, int width) {
 	else if (x == width - 1) {
 		if (y == 0)
 			output[i] = input[i - height] - 4 * input[i] + input[i + 1];
-		else if (y == width - 1)
+		else if (y == height - 1)
 			output[i] = input[i - height] - 4 * input[i] + input[i - 1];
 		else
 			output[i] = input[i - height] - 4 * input[i] + input[i + 1] + input[i - 1];
@@ -557,11 +536,6 @@ void fourierFilterForCalib(image* calibImage) {
 //	complexWrite("fft after shift", tempComplex, 960, "../Debug/calib_FFT_Shifted.csv");
 
 
-	cudaEvent_t absStart;
-	cudaEventCreate(&absStart);
-	cudaEvent_t absStop;
-	cudaEventCreate(&absStop);
-	cudaEventRecord(absStart, NULL);
 
 	cudaEvent_t absStart;
 	cudaEventCreate(&absStart);
@@ -771,7 +745,8 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 
 	phaseUnwrapping(phaseImage, UnwrappedImage);
 
-	realWrite("phase image after unwrapping", UnwrappedImage, 1280, "..\ouput_text\phase_image2.csv");
+	realWrite("phase image after unwrapping", UnwrappedImage, 960, "../Debug/phase_image2.csv");
+	//imageFileWrite(UnwrappedImage, "phase_image.tif");
 	
 	if (cudaSuccess != cudaMemcpy(dev_phaseImage, phaseImage, testImage->imagePixels * sizeof(float), cudaMemcpyHostToDevice))
 		cout << "cuda memory cpy error!" << endl;
@@ -833,7 +808,7 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 
 }
 
-float* phaseUnwrapping(float* wMatrix, float* result) {
+void phaseUnwrapping(float* wMatrix, float* result) {
 	dim3 blockSize(32, 32, 1), gridSize(40, 30, 1);
 	int imageSize = 1280 * 960;
 	int width = 960;
@@ -851,7 +826,7 @@ float* phaseUnwrapping(float* wMatrix, float* result) {
 		cout << "cuda malloc error!" << endl;
 	if (cudaSuccess != cudaMalloc((void**)& dev_unwrapC, sizeof(double) * imageSize))
 		cout << "cuda malloc error!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_unwrapC, sizeof(double) * imageSize))
+	if (cudaSuccess != cudaMalloc((void**)& dev_result, sizeof(double) * imageSize))
 		cout << "cuda malloc error!" << endl;
 	if (cudaSuccess != cudaMalloc((void**)& dev_wMatrix, sizeof(float) * imageSize))
 		cout << "cuda malloc error!" << endl;
@@ -874,7 +849,7 @@ float* phaseUnwrapping(float* wMatrix, float* result) {
 		cout << "cuda memory cpy error!" << endl;
 }
 
-void imageFileWrite(float* input, char* filename) {
+void imageFileWrite(float* input, const char* filename) {
 
 	TIFF* tif = TIFFOpen(filename, "w");
 	if (tif) {
