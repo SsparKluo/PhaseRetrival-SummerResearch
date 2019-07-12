@@ -11,8 +11,10 @@
 #include"myUnwrap.h"
 #include"matrix.h"
 
+
 #define lambda 0.632
 #define pi 3.1415926
+#define TILE_WIDTH 16
 
 typedef unsigned char BYTE;
 
@@ -48,7 +50,7 @@ void imageFileWrite(float* input, char* filename);
 void complexWrite(const char* title, float2* input, int width, const char* filename);
 void realWrite(const char* title, float* input, int width, const char* filename);
 void errorHandle(int input);
-
+float* phaseUnwrapping(float* wMatrix);
 
 __global__ void vectorAdd(float* a, float* b, float* c, int numElements) {
 	int x = blockIdx.x;
@@ -259,6 +261,142 @@ __global__ void calOutputImage(cufftReal* input, float* output, int numElements)
 		output[i] = ((input[i] + 15) / 30) * 256 - 1;
 	}
 }
+
+__global__ void matrixMultiple(float* output, float* matrixL, float* matrixR , int size ,int numElements) {
+	int i = (blockIdx.x * blockDim.x + threadIdx.x) * (blockDim.y * gridDim.y) + (threadIdx.y + blockIdx.y * blockDim.y);
+	int x = blockDim.x * blockIdx.x + threadIdx.x;
+	int y = blockDim.y * blockDim.y + threadIdx.y;
+	if (i < numElements) {
+		float data;
+		for (int a = 0; a < size; a++) {
+			data += matrixL[a * size + y] * matrixR[a + x * size];
+		}
+		output[i] = data;
+	}
+}
+
+__global__ void DCTMatrixL(int height, float* DCTMatrixL) {
+	int i = (blockIdx.x * blockDim.x + threadIdx.x) * (blockDim.y * gridDim.y) + (threadIdx.y + blockIdx.y * blockDim.y);
+	int x = blockDim.x * blockIdx.x + threadIdx.x;
+	int y = blockDim.y * blockDim.y + threadIdx.y;
+	DCTMatrixL[i] = cospi((2 * x + 1) * y / 2 * height);
+}
+
+__global__ void DCTMatrixR(int width, float* DCTMatrixR) {
+	int i = (blockIdx.x * blockDim.x + threadIdx.x) * (blockDim.y * gridDim.y) + (threadIdx.y + blockIdx.y * blockDim.y);
+	int x = blockDim.x * blockIdx.x + threadIdx.x;
+	int y = blockDim.y * blockDim.y + threadIdx.y;
+	DCTMatrixR[i] = cospi((2 * y + 1) * x / 2 * width);
+}
+
+__global__ void matrixModify(float* input ,int width, int height) {
+	int i = (blockIdx.x * blockDim.x + threadIdx.x) * (blockDim.y * gridDim.y) + (threadIdx.y + blockIdx.y * blockDim.y);
+	int x = blockDim.x * blockIdx.x + threadIdx.x;
+	int y = blockDim.y * blockDim.y + threadIdx.y;
+	input[i] = input[i] / (2 * (cospi(x / width) + cospi(y / height) - 2));
+}
+
+__global__ void matrixModify(float* input, int width, int height) {
+	int i = (blockIdx.x * blockDim.x + threadIdx.x) * (blockDim.y * gridDim.y) + (threadIdx.y + blockIdx.y * blockDim.y);
+	int x = blockDim.x * blockIdx.x + threadIdx.x;
+	int y = blockDim.y * blockDim.y + threadIdx.y;
+	input[i] = input[i] / (2 * (cospi((float)x / width) + cospi((float)y / height) - 2));
+	if (x == 0)
+		if (y == 0)
+			input[i] = input[i] / (height * width);
+		else
+			input[i] = input[i] * 2 / (height * width);
+	else
+		if (y == 0)
+			input[i] = input[i] / height * width;
+		else
+			input[i] = input[i] * 2 / (height * width);
+}
+
+__global__ normalizer(float* input , int height , int width) {
+	int i = (blockIdx.x * blockDim.x + threadIdx.x) * (blockDim.y * gridDim.y) + (threadIdx.y + blockIdx.y * blockDim.y);
+	int x = blockDim.x * blockIdx.x + threadIdx.x;
+	int y = blockDim.y * blockDim.y + threadIdx.y;
+	if (x == 0)
+		if (y == 0)
+			input[i] = input[i] * sqrt((float)1 / (height * width));
+		else
+			input[i] = input[i] * sqrt((float)2 / (height * width));
+	else
+		if (y == 0)
+			input[i] = input[i] / sqrt((float)height * width);
+		else
+			input[i] = input[i] * sqrt((float)2 / (height * width));
+}
+
+__global__ void gradCal(float* input, float* output, int height, int width) {
+	int i = (blockIdx.x * blockDim.x + threadIdx.x) * (blockDim.y * gridDim.y) + (threadIdx.y + blockIdx.y * blockDim.y);
+	int x = blockDim.x * blockIdx.x + threadIdx.x;
+	int y = blockDim.y * blockDim.y + threadIdx.y;
+	if (x < width - 1 && y < height - 1 && x > 0 && y > 0) {
+		output[i] = input[i + height] + input[i - height] - 4 * input[i] + input[i + 1] + input[i - 1];
+	}
+	else if (x == 0) {
+		if (y == 0)
+			output[i] = input[i + height] - 4 * input[i] + input[i + 1];
+		else if (y == width - 1)
+			output[i] = input[i + height] - 4 * input[i] + input[i - 1];
+		else
+			output[i] = input[i + height] - 4 * input[i] + input[i + 1] + input[i - 1];
+	}
+	else if (x == width - 1) {
+		if (y == 0)
+			output[i] = input[i - height] - 4 * input[i] + input[i + 1];
+		else if (y == width - 1)
+			output[i] = input[i - height] - 4 * input[i] + input[i - 1];
+		else
+			output[i] = input[i - height] - 4 * input[i] + input[i + 1] + input[i - 1];
+	}
+}
+
+/*
+__global__ void MatrixMultiple(int m, int n, int k, float* A, float* B, float* C)
+{
+	__shared__ float ds_A[TILE_WIDTH][TILE_WIDTH];
+	__shared__ float ds_B[TILE_WIDTH][TILE_WIDTH];
+
+	int bx = blockIdx.x;		int by = blockIdx.y;
+	int tx = threadIdx.x;		int ty = threadIdx.y;
+
+	int Row = by * TILE_WIDTH + ty;
+	int Col = bx * TILE_WIDTH + tx;
+
+	double Cvalue = 0;
+
+	for (int t = 0; t < (n - 1) / TILE_WIDTH + 1; ++t)
+	{
+		
+		if (Row < m && t * TILE_WIDTH + tx < n)		//越界处理，满足任意大小的矩阵相乘（可选）
+			//ds_A[tx][ty] = A[t*TILE_WIDTH + tx][Row];
+			ds_A[tx][ty] = A[Row * n + t * TILE_WIDTH + tx];//以合并的方式加载瓦片
+		else
+			ds_A[tx][ty] = 0.0;
+
+		if (t * TILE_WIDTH + ty < n && Col < k)
+			//ds_B[tx][ty] = B[Col][t*TILE_WIDTH + ty];
+			ds_B[tx][ty] = B[(t * TILE_WIDTH + ty) * k + Col];
+		else
+			ds_B[tx][ty] = 0.0;
+
+		//保证tile中所有的元素被加载
+		__syncthreads();
+
+		for (int i = 0; i < TILE_WIDTH; ++i)
+			Cvalue += ds_A[i][ty] * ds_B[tx][i];//从shared memory中取值
+
+		//确保所有线程完成计算后，进行下一个阶段的计算
+		__syncthreads();
+
+		if (Row < m && Col < k)
+			C[Row * k + Col] = Cvalue;
+	}
+}
+*/
 
 
 int main() {
@@ -572,7 +710,7 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 		cout << "cude memory free error!" << endl;
 
 	float* phaseImage = (float*)malloc(sizeof(float) * imageSizeL);
-	/*
+	
 	cufftReal* dev_phaseImage;
 	cufftComplex* dev_calibFilteredBaseband, * dev_finalImage;
 	if (cudaSuccess != cudaMalloc((void**)& dev_phaseImage, sizeof(float) * imageSizeL))
@@ -594,16 +732,11 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 		cout << "cuda memory cpy error!" << endl;
 	realWrite("phase image", phaseImage, 960, "../Debug/phase_image1.csv");
 	
-	if (!myUnwrapInitialize()) {
-		cout << "matlab unwrap function initialize error" << endl;
-	}
-	mwArray matlabInput(960, 1280, mxSINGLE_CLASS);
-	mwArray matlabOutput(960, 1280, mxSINGLE_CLASS);
-	matlabInput.SetData(phaseImage,960*1280);
-	myUnwrap(matlabInput);
-	matlabOutput.GetData(phaseImage, 960 * 1280);
-	//别忘了调整matlab\extern的地址
-	realWrite("phase image after unwrapping", phaseImage, 1280, "..\ouput_text\phase_image2.csv");
+	float* UnwrappedImage = new float[imageSizeL];
+
+	phaseUnwrapping(phaseImage, UnwrappedImage);
+
+	realWrite("phase image after unwrapping", UnwrappedImage, 1280, "..\ouput_text\phase_image2.csv");
 	
 	if (cudaSuccess != cudaMemcpy(dev_phaseImage, phaseImage, testImage->imagePixels * sizeof(float), cudaMemcpyHostToDevice))
 		cout << "cuda memory cpy error!" << endl;
@@ -660,10 +793,50 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 
 	cudaFree(dev_output);
 	cudaFree(dev_height);
-	*/
-	//return height1;
-	float* a;
-	return a;
+	
+	return height1;
+
+}
+
+float* phaseUnwrapping(float* wMatrix, float* result) {
+	dim3 blockSize(32, 32, 1), gridSize(40, 30, 1);
+	int imageSize = 1280 * 960;
+	int width = 960;
+	int height = 1280;
+
+	float* dev_wMatrix;
+	float* dev_GradMatrix, * dev_matrixS, * dev_matrixL, * dev_temp, * dev_unwrapC, * dev_result;
+	if (cudaSuccess != cudaMalloc((void**)& dev_GradMatrix, sizeof(float) * imageSize))
+		cout << "cuda malloc error!" << endl;
+	if (cudaSuccess != cudaMalloc((void**)& dev_matrixS, sizeof(double) * imageSize))
+		cout << "cuda malloc error!" << endl;
+	if (cudaSuccess != cudaMalloc((void**)& dev_matrixL, sizeof(double) * imageSize))
+		cout << "cuda malloc error!" << endl;
+	if (cudaSuccess != cudaMalloc((void**)& dev_temp, sizeof(double) * imageSize))
+		cout << "cuda malloc error!" << endl;
+	if (cudaSuccess != cudaMalloc((void**)& dev_unwrapC, sizeof(double) * imageSize))
+		cout << "cuda malloc error!" << endl;
+	if (cudaSuccess != cudaMalloc((void**)& dev_unwrapC, sizeof(double) * imageSize))
+		cout << "cuda malloc error!" << endl;
+	if (cudaSuccess != cudaMalloc((void**)& dev_wMatrix, sizeof(float) * imageSize))
+		cout << "cuda malloc error!" << endl;
+
+	if (cudaSuccess != cudaMemcpy(dev_wMatrix, wMatrix, 1280 * 960 * sizeof(float), cudaMemcpyHostToDevice))
+		cout << "cuda memory cpy error!" << endl;
+	gradCal << <gridSize, blockSize >> > (dev_wMatrix, dev_GradMatrix, 960, 1280);
+
+	DCTMatrixL<<<gridSize , blockSize >>>(height, dev_matrixS);
+	DCTMatrixR<<<gridSize , blockSize >>>(width, dev_matrixL);
+
+	matrixMultiple << <gridSize, blockSize >> > (dev_temp, dev_matrixS, dev_GradMatrix, 960, imageSize);
+	matrixMultiple << <gridSize, blockSize >> > (dev_unwrapC, dev_temp, dev_matrixL, 1280, imageSize);
+	matrixModify << <gridSize, blockSize >> > (dev_unwrapC, 1280, 960);
+
+	matrixMultiple << <gridSize, blockSize >> > (dev_temp, dev_matrixS, dev_unwrapC, 960, imageSize);
+	matrixMultiple << <gridSize, blockSize >> > (dev_result, dev_temp, dev_matrixL, 1280, imageSize);
+
+	if (cudaSuccess != cudaMemcpy(result, dev_result, imageSize * sizeof(float), cudaMemcpyDeviceToHost))
+		cout << "cuda memory cpy error!" << endl;
 }
 
 void imageFileWrite(float* input, char* filename) {
@@ -748,3 +921,4 @@ cudaEventSynchronize(stop1);
 float msecTotal1 = 0.0f;
 cudaEventElapsedTime(&msecTotal1, start1, stop1);
 */
+
