@@ -818,15 +818,15 @@ void phaseUnwrapping(float* wMatrix, float* result) {
 	float* dev_GradMatrix, * dev_matrixS, * dev_matrixL, * dev_temp, * dev_unwrapC, * dev_result;
 	if (cudaSuccess != cudaMalloc((void**)& dev_GradMatrix, sizeof(float) * imageSize))
 		cout << "cuda malloc error!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_matrixS, sizeof(double) * imageSize))
+	if (cudaSuccess != cudaMalloc((void**)& dev_matrixS, sizeof(float) * imageSize))
 		cout << "cuda malloc error!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_matrixL, sizeof(double) * imageSize))
+	if (cudaSuccess != cudaMalloc((void**)& dev_matrixL, sizeof(float) * imageSize))
 		cout << "cuda malloc error!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_temp, sizeof(double) * imageSize))
+	if (cudaSuccess != cudaMalloc((void**)& dev_temp, sizeof(float) * imageSize))
 		cout << "cuda malloc error!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_unwrapC, sizeof(double) * imageSize))
+	if (cudaSuccess != cudaMalloc((void**)& dev_unwrapC, sizeof(float) * imageSize))
 		cout << "cuda malloc error!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_result, sizeof(double) * imageSize))
+	if (cudaSuccess != cudaMalloc((void**)& dev_result, sizeof(float) * imageSize))
 		cout << "cuda malloc error!" << endl;
 	if (cudaSuccess != cudaMalloc((void**)& dev_wMatrix, sizeof(float) * imageSize))
 		cout << "cuda malloc error!" << endl;
