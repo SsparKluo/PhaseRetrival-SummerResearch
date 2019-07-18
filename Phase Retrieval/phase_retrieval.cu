@@ -11,11 +11,14 @@
 #include"myUnwrap.h"
 #include"matrix.h"
 #include<math.h>
-
+#include"cuBLAS.h"
 
 #define lambda 0.632
 #define pi 3.1415926
 #define TILE_WIDTH 16
+#define FORWARE1 1
+#define FORWARD2 0
+#define INVERSE 1
 
 typedef unsigned char BYTE;
 
@@ -263,80 +266,95 @@ __global__ void calOutputImage(cufftReal* input, float* output, int numElements)
 	}
 }
 
-__global__ void matrixMultiple(float* output, float* matrixL, float* matrixR , int size ,int numElements) {
+__global__ void DCTMatrix(float* matrixL, float* matrixR, int height, int width) {
 	int i = (blockIdx.x * blockDim.x + threadIdx.x) * (blockDim.y * gridDim.y) + (threadIdx.y + blockIdx.y * blockDim.y);
 	int x = blockDim.x * blockIdx.x + threadIdx.x;
 	int y = blockDim.y * blockDim.y + threadIdx.y;
-	if (i < numElements) {
-		float data;
-		for (int a = 0; a < size; a++) {
-			data += matrixL[a * size + y] * matrixR[a + x * size];
-		}
-		output[i] = data;
+	if (x < height && y < height) {
+		matrixL[i] = cos(y * pi * (2 * x + 1) / (2 * height));
 	}
+	matrixR[i] = cos(x * pi * (2 * y + 1) / (2 * width));
 }
 
-__global__ void DCTMatrixL(int height, float* DCTMatrixL) {
+__global__ void IDCTMatrix(float* matrixL, float* matrixR, int height, int width) {
 	int i = (blockIdx.x * blockDim.x + threadIdx.x) * (blockDim.y * gridDim.y) + (threadIdx.y + blockIdx.y * blockDim.y);
 	int x = blockDim.x * blockIdx.x + threadIdx.x;
 	int y = blockDim.y * blockDim.y + threadIdx.y;
-	DCTMatrixL[i] = cos((float)(2 * x + 1) * y * pi / 2 * height);
+	if (x < height && y < height) {
+		float w1;
+		if (y == 0)
+			w1 = 1 / 2;
+		else
+			w1 = 1;
+		matrixL[i] = w1 * cos(y * pi * (2 * x + 1) / (2 * height));
+	}
+	float w2;
+	if (x == 0)
+		w2 = 1 / 2;
+	else
+		w2 = 1;
+	matrixR[i] = w2 * cos(x * pi * (2 * y + 1) / (2 * width));
 }
 
-__global__ void DCTMatrixR(int width, float* DCTMatrixR) {
-	int i = (blockIdx.x * blockDim.x + threadIdx.x) * (blockDim.y * gridDim.y) + (threadIdx.y + blockIdx.y * blockDim.y);
-	int x = blockDim.x * blockIdx.x + threadIdx.x;
-	int y = blockDim.y * blockDim.y + threadIdx.y;
-	DCTMatrixR[i] = cos((float)(2 * y + 1) * x * pi / 2 * width);
-}
-
-
-__global__ void matrixModify(float* input, int width, int height) {
+__global__ void matrixModify(float* input, int height, int width) {
 	int i = (blockIdx.x * blockDim.x + threadIdx.x) * (blockDim.y * gridDim.y) + (threadIdx.y + blockIdx.y * blockDim.y);
 	int x = blockDim.x * blockIdx.x + threadIdx.x;
 	int y = blockDim.y * blockDim.y + threadIdx.y;
 	input[i] = input[i] / (2 * (cos((float)x * pi/ width) + cos((float)y *pi / height) - 2));
-	if (x == 0)
-		if (y == 0)
-			input[i] = input[i] / (height * width);
-		else
-			input[i] = input[i] * 2 / (height * width);
+}
+
+__device__ float wrap(float input) {
+	float output;
+	if (input < -pi)
+		output = 2 * pi + input;
+	else if (input > pi)
+		output = input - 2 * pi;
 	else
-		if (y == 0)
-			input[i] = input[i] / height * width;
-		else
-			input[i] = input[i] * 2 / (height * width);
+		output = input;
+	return output;
 }
 
 __global__ void gradCal(float* input, float* output, int height, int width) {
 	int i = (blockIdx.x * blockDim.x + threadIdx.x) * (blockDim.y * gridDim.y) + (threadIdx.y + blockIdx.y * blockDim.y);
 	int x = blockDim.x * blockIdx.x + threadIdx.x;
 	int y = blockDim.y * blockDim.y + threadIdx.y;
-	if (x < width - 1 && y < height - 1 && x > 0 && y > 0) {
-		output[i] = input[i + height] + input[i - height] - 4 * input[i] + input[i + 1] + input[i - 1];
-	}
-	else if (x == 0) {
-		if (y == 0)
-			output[i] = input[i + height] - 4 * input[i] + input[i + 1];
-		else if (y == height - 1)
-			output[i] = input[i + height] - 4 * input[i] + input[i - 1];
-		else
-			output[i] = input[i + height] - 4 * input[i] + input[i + 1] + input[i - 1];
+	if (x == 0) {
+		if (y == 0) {
+			output[i] = wrap(input[i + height] - input[i]) + wrap(input[i + 1] - input[i]);
+		}
+		else if (y == height - 1) {
+			output[i] = wrap(input[i + height] - input[i]) - wrap(input[i] - input[i - 1]);
+		}
+		else {
+			output[i] = wrap(input[i + height] - input[i]) + wrap(input[i + 1] - input[i]) - wrap(input[i] - input[i - 1]);
+		}
 	}
 	else if (x == width - 1) {
-		if (y == 0)
-			output[i] = input[i - height] - 4 * input[i] + input[i + 1];
-		else if (y == height - 1)
-			output[i] = input[i - height] - 4 * input[i] + input[i - 1];
-		else
-			output[i] = input[i - height] - 4 * input[i] + input[i + 1] + input[i - 1];
+		if (y == 0) {
+			output[i] = -wrap(input[i] - input[i - 1]) + wrap(input[i + 1] - input[i]);
+		}
+		else if (y == height - 1) {
+			output[i] = -wrap(input[i] - input[i - 1]) - wrap(input[i] - input[i - 1]);
+		}
+		else {
+			output[i] = -wrap(input[i] - input[i - 1]) + wrap(input[i + 1] - input[i]) - wrap(input[i] - input[i - 1]);
+		}
 	}
-	else
-		if (y == 0)
-			output[i] = input[i + height] + input[i - height] - 4 * input[i] + input[i + 1];
-		else if (y == height - 1)
-			output[i] = input[i + height] + input[i - height] - 4 * input[i] + input[i - 1];
+	else {
+		if (y == 0) {
+			output[i] = wrap(input[i + height] - input[i]) - wrap(input[i] - input[i - 1]) + wrap(input[i + 1] - input[i]);
+		}
+		else if (y == height - 1) {
+			output[i] = wrap(input[i + height]) - wrap(input[i] - input[i - 1]) - wrap(input[i] - input[i - 1]);
+		}
+		else {
+			output[i] = wrap(input[i + height]) - wrap(input[i] - input[i - 1]) + wrap(input[i + 1] - input[i]) - wrap(input[i] - input[i - 1]);
+		}
+	}
 }
+
+
+
 
 /*
 __global__ void MatrixMultiple(int m, int n, int k, float* A, float* B, float* C)
@@ -818,16 +836,23 @@ void phaseUnwrapping(float* wMatrix, float* result) {
 	int width = 960;
 	int height = 1280;
 
-	float* dev_wMatrix;
+	cublasHandle_t handle;
+	cublasCreate_v2(&handle);
+	const float alpha = 1.0f;
+	const float beta = 0.0f;
+
+
 	float* tempOut = new float[imageSize];
-	float* dev_GradMatrix, * dev_matrixS, * dev_matrixL, * dev_temp, * dev_unwrapC, * dev_result;
+	float* dev_GradMatrix, * dev_matrixS, * dev_matrixL, * dev_temp1, * dev_temp2, * dev_unwrapC, * dev_result, * dev_wMatrix;
 	if (cudaSuccess != cudaMalloc((void**)& dev_GradMatrix, sizeof(float) * imageSize))
 		cout << "cuda malloc error!" << endl;
 	if (cudaSuccess != cudaMalloc((void**)& dev_matrixS, sizeof(float) * imageSize))
 		cout << "cuda malloc error!" << endl;
 	if (cudaSuccess != cudaMalloc((void**)& dev_matrixL, sizeof(float) * imageSize))
 		cout << "cuda malloc error!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_temp, sizeof(float) * imageSize))
+	if (cudaSuccess != cudaMalloc((void**)& dev_temp1, sizeof(float) * imageSize))
+		cout << "cuda malloc error!" << endl;
+	if (cudaSuccess != cudaMalloc((void**)& dev_temp2, sizeof(float) * imageSize))
 		cout << "cuda malloc error!" << endl;
 	if (cudaSuccess != cudaMalloc((void**)& dev_unwrapC, sizeof(float) * imageSize))
 		cout << "cuda malloc error!" << endl;
@@ -835,33 +860,37 @@ void phaseUnwrapping(float* wMatrix, float* result) {
 		cout << "cuda malloc error!" << endl;
 	if (cudaSuccess != cudaMalloc((void**)& dev_wMatrix, sizeof(float) * imageSize))
 		cout << "cuda malloc error!" << endl;
-
 	if (cudaSuccess != cudaMemcpy(dev_wMatrix, wMatrix, 1280 * 960 * sizeof(float), cudaMemcpyHostToDevice))
 		cout << "cuda memory cpy error!" << endl;
 
 	gradCal << <gridSize, blockSize >> > (dev_wMatrix, dev_GradMatrix, 960, 1280);
-	if (cudaSuccess != cudaMemcpy(tempOut, dev_GradMatrix, 1280 * 960 * sizeof(float), cudaMemcpyDeviceToHost))
-		cout << "cuda memory cpy error!" << endl;
-	realWrite("temp", tempOut, 960, "../Debug/grad.csv");
+	DCTMatrix << <gridSize, blockSize >> > (dev_matrixS, dev_matrixL, 960, 1280);
+	cublasSgemm_v2(handle, CUBLAS_OP_N, CUBLAS_OP_N, 960, 1280, 960, &alpha, dev_matrixS, 960, dev_GradMatrix, 960, &beta, dev_temp1, 960);
+	cublasSgemm_v2(handle, CUBLAS_OP_N, CUBLAS_OP_N, 960, 1280, 1280, &alpha, dev_temp1, 960, dev_matrixL, 1280, &beta, dev_temp2, 960);
+	matrixModify << <gridSize, blockSize >> > (dev_temp2, 960, 1280);
+	IDCTMatrix << <gridSize, blockSize >> > (dev_matrixS, dev_matrixL, 960, 1280);
+	cublasSgemm_v2(handle, CUBLAS_OP_N, CUBLAS_OP_N, 960, 1280, 960, &alpha, dev_matrixS, 960, dev_temp2, 960, &beta, dev_temp1, 960);
+	cublasSgemm_v2(handle, CUBLAS_OP_N, CUBLAS_OP_N, 960, 1280, 1280, &alpha, dev_temp1, 960, dev_matrixL, 1280, &beta, dev_result, 960);
 
-	DCTMatrixL<<<gridSize , blockSize >>>(height, dev_matrixS);
-	DCTMatrixR<<<gridSize , blockSize >>>(width, dev_matrixL);
-	if (cudaSuccess != cudaMemcpy(tempOut, dev_matrixS, 1280 * 960 * sizeof(float), cudaMemcpyDeviceToHost))
+	if (cudaSuccess != cudaMemcpy(result, dev_result, 1280 * 960 * sizeof(float), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error!" << endl;
-	realWrite("temp", tempOut, 960, "../Debug/DCTMatrixS.csv");
-	if (cudaSuccess != cudaMemcpy(tempOut, dev_matrixL, 1280 * 960 * sizeof(float), cudaMemcpyDeviceToHost))
-		cout << "cuda memory cpy error!" << endl;
-	realWrite("temp", tempOut, 960, "../Debug/DCTMatrixL.csv");
 
-	matrixMultiple << <gridSize, blockSize >> > (dev_temp, dev_matrixS, dev_GradMatrix, 960, imageSize);
-	matrixMultiple << <gridSize, blockSize >> > (dev_unwrapC, dev_temp, dev_matrixL, 1280, imageSize);
-	matrixModify << <gridSize, blockSize >> > (dev_unwrapC, 1280, 960);
-
-	matrixMultiple << <gridSize, blockSize >> > (dev_temp, dev_matrixS, dev_unwrapC, 960, imageSize);
-	matrixMultiple << <gridSize, blockSize >> > (dev_result, dev_temp, dev_matrixL, 1280, imageSize);
-
-	if (cudaSuccess != cudaMemcpy(result, dev_result, imageSize * sizeof(float), cudaMemcpyDeviceToHost))
-		cout << "cuda memory cpy error!" << endl;
+	if (cudaSuccess != cudaFree(dev_GradMatrix))
+		cout << "cude memory free error!" << endl;
+	if (cudaSuccess != cudaFree(dev_matrixS))
+		cout << "cude memory free error!" << endl;
+	if (cudaSuccess != cudaFree(dev_matrixL))
+		cout << "cude memory free error!" << endl;
+	if (cudaSuccess != cudaFree(dev_temp1))
+		cout << "cude memory free error!" << endl;
+	if (cudaSuccess != cudaFree(dev_temp2))
+		cout << "cude memory free error!" << endl;
+	if (cudaSuccess != cudaFree(dev_unwrapC))
+		cout << "cude memory free error!" << endl;
+	if (cudaSuccess != cudaFree(dev_result))
+		cout << "cude memory free error!" << endl;
+	if (cudaSuccess != cudaFree(dev_wMatrix))
+		cout << "cude memory free error!" << endl;
 }
 
 void imageFileWrite(float* input, char* filename) {
