@@ -876,9 +876,9 @@ void phaseUnwrapping(float* wMatrix, float* result) {
 	float* dev_GradMatrix, * dev_matrixS, * dev_matrixL, * dev_temp1, * dev_temp2, * dev_unwrapC, * dev_result, * dev_wMatrix;
 	if (cudaSuccess != cudaMalloc((void**)& dev_GradMatrix, sizeof(float) * imageSize))
 		cout << "cuda malloc error!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_matrixS, sizeof(float) * imageSize))
+	if (cudaSuccess != cudaMalloc((void**)& dev_matrixS, sizeof(float) * 960 * 960))
 		cout << "cuda malloc error!" << endl;
-	if (cudaSuccess != cudaMalloc((void**)& dev_matrixL, sizeof(float) * imageSize))
+	if (cudaSuccess != cudaMalloc((void**)& dev_matrixL, sizeof(float) * 1280 * 1280))
 		cout << "cuda malloc error!" << endl;
 	if (cudaSuccess != cudaMalloc((void**)& dev_temp1, sizeof(float) * imageSize))
 		cout << "cuda malloc error!" << endl;
