@@ -356,6 +356,7 @@ __global__ void gradCal(float* input, float* output, int height, int width) {
 	}
 }
 
+/*
 __global__ void residueDetect(float* input, float* output, int height, int width) {
 	int i = (blockIdx.x * blockDim.x + threadIdx.x) * (blockDim.y * gridDim.y) + (threadIdx.y + blockIdx.y * blockDim.y);
 	int x = blockDim.x * blockIdx.x + threadIdx.x;
@@ -384,7 +385,7 @@ __global__ void residueDetect(float* input, float* output, int height, int width
 	else if (temp >= -1.2 && temp <= -0.8)
 		output[i] = -1;
 }
-
+*/
 
 /*
 __global__ void MatrixMultiple(int m, int n, int k, float* A, float* B, float* C)
@@ -867,7 +868,7 @@ void phaseUnwrapping(float* wMatrix, float* result) {
 	int height = 1280;
 
 	cublasHandle_t handle;
-	cublasCreate_v2(&handle);
+	cublasCreate(&handle);
 	const float alpha = 1.0f;
 	const float beta = 0.0f;
 
@@ -895,12 +896,12 @@ void phaseUnwrapping(float* wMatrix, float* result) {
 
 	gradCal << <gridSize, blockSize >> > (dev_wMatrix, dev_GradMatrix, 960, 1280);
 	DCTMatrix << <gridSize, blockSize >> > (dev_matrixS, dev_matrixL, 960, 1280);
-	cublasSgemm_v2(handle, CUBLAS_OP_N, CUBLAS_OP_N, 960, 1280, 960, &alpha, dev_matrixS, 960, dev_GradMatrix, 960, &beta, dev_temp1, 960);
-	cublasSgemm_v2(handle, CUBLAS_OP_N, CUBLAS_OP_N, 960, 1280, 1280, &alpha, dev_temp1, 960, dev_matrixL, 1280, &beta, dev_temp2, 960);
+	cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, 960, 1280, 960, &alpha, dev_matrixS, 960, dev_GradMatrix, 960, &beta, dev_temp1, 960);
+	cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, 960, 1280, 1280, &alpha, dev_temp1, 960, dev_matrixL, 1280, &beta, dev_temp2, 960);
 	matrixModify << <gridSize, blockSize >> > (dev_temp2, 960, 1280);
 	IDCTMatrix << <gridSize, blockSize >> > (dev_matrixS, dev_matrixL, 960, 1280);
-	cublasSgemm_v2(handle, CUBLAS_OP_N, CUBLAS_OP_N, 960, 1280, 960, &alpha, dev_matrixS, 960, dev_temp2, 960, &beta, dev_temp1, 960);
-	cublasSgemm_v2(handle, CUBLAS_OP_N, CUBLAS_OP_N, 960, 1280, 1280, &alpha, dev_temp1, 960, dev_matrixL, 1280, &beta, dev_result, 960);
+	cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, 960, 1280, 960, &alpha, dev_matrixS, 960, dev_temp2, 960, &beta, dev_temp1, 960);
+	cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, 960, 1280, 1280, &alpha, dev_temp1, 960, dev_matrixL, 1280, &beta, dev_result, 960);
 
 	if (cudaSuccess != cudaMemcpy(result, dev_result, 1280 * 960 * sizeof(float), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error!" << endl;
