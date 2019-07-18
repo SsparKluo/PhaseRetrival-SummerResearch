@@ -896,15 +896,15 @@ void phaseUnwrapping(float* wMatrix, float* result) {
 	gradCal << <gridSize, blockSize >> > (dev_wMatrix, dev_GradMatrix, 960, 1280);
 
 	if (cudaSuccess != cudaMemcpy(tempOut, dev_GradMatrix, 1280 * 960 * sizeof(float), cudaMemcpyDeviceToHost))
-		cout << "cuda memory cpy error!" << endl;
+		cout << "cuda memory cpy error1!" << endl;
 	realWrite("grad", tempOut, 960, "../Debug/grad.csv");
 
 	DCTMatrix << <gridSize, blockSize >> > (dev_matrixS, dev_matrixL, 960, 1280);
 	cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, 960, 1280, 960, &alpha, dev_matrixS, 960, dev_GradMatrix, 960, &beta, dev_temp1, 960);
 	cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, 960, 1280, 1280, &alpha, dev_temp1, 960, dev_matrixL, 1280, &beta, dev_temp2, 960);
 	matrixModify << <gridSize, blockSize >> > (dev_temp2, 960, 1280);
-	if (cudaSuccess != cudaMemcpy(tempOut, dev_GradMatrix, 1280 * 960 * sizeof(float), cudaMemcpyDeviceToHost))
-		cout << "cuda memory cpy error!" << endl;
+	if (cudaSuccess != cudaMemcpy(tempOut, dev_temp2, 1280 * 960 * sizeof(float), cudaMemcpyDeviceToHost))
+		cout << "cuda memory cpy error2!" << endl;
 	realWrite("grad", tempOut, 960, "../Debug/modified.csv");
 
 	IDCTMatrix << <gridSize, blockSize >> > (dev_matrixS, dev_matrixL, 960, 1280);
@@ -912,7 +912,7 @@ void phaseUnwrapping(float* wMatrix, float* result) {
 	cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, 960, 1280, 1280, &alpha, dev_temp1, 960, dev_matrixL, 1280, &beta, dev_result, 960);
 
 	if (cudaSuccess != cudaMemcpy(result, dev_result, 1280 * 960 * sizeof(float), cudaMemcpyDeviceToHost))
-		cout << "cuda memory cpy error!" << endl;
+		cout << "cuda memory cpy error3!" << endl;
 
 	if (cudaSuccess != cudaFree(dev_GradMatrix))
 		cout << "cude memory free error!" << endl;
