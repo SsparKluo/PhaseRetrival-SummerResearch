@@ -12,6 +12,8 @@
 #include"matrix.h"
 #include<math.h>
 #include"cuBLAS.h"
+#include <device_functions.h>
+#include <cuda_runtime_api.h>
 
 #define lambda 0.632
 #define pi 3.1415926
@@ -19,6 +21,7 @@
 #define FORWARE1 1
 #define FORWARD2 0
 #define INVERSE 1
+
 
 typedef unsigned char BYTE;
 
@@ -353,7 +356,34 @@ __global__ void gradCal(float* input, float* output, int height, int width) {
 	}
 }
 
+__global__ void residueDetect(float* input, float* output, int height, int width) {
+	int i = (blockIdx.x * blockDim.x + threadIdx.x) * (blockDim.y * gridDim.y) + (threadIdx.y + blockIdx.y * blockDim.y);
+	int x = blockDim.x * blockIdx.x + threadIdx.x;
+	int y = blockDim.y * blockDim.y + threadIdx.y;
+	
+	__shared__ float ds_input[33][33];
+	if (threadIdx.x == 31) {
+		ds_input[32][threadIdx.y] = input[i + height];
+		if (threadIdx.y == 31)
+			ds_input[32][32] = input[i + 1 + height];
+	}
+	if (threadIdx.y == 31)
+		ds_input[threadIdx.x][32] = input[i + 1];
+	ds_input[threadIdx.x][threadIdx.y] = input[i];
+	cudaThreadSynchronize();
 
+	float diff1, diff2, diff3, diff4, temp;
+	temp =  wrap(ds_input[threadIdx.x][threadIdx.y] - ds_input[threadIdx.x + 1][threadIdx.y]) +
+			wrap(ds_input[threadIdx.x + 1][threadIdx.y] - ds_input[threadIdx.x + 1][threadIdx.y + 1]) +	
+			wrap(ds_input[threadIdx.x + 1][threadIdx.y + 1] - ds_input[threadIdx.x][threadIdx.y + 1])+
+			wrap(ds_input[threadIdx.x][threadIdx.y + 1] - ds_input[threadIdx.x][threadIdx.y]);
+	if (temp <= 0.2 && temp >= -0.2)
+		output[i] = 0;
+	else if (temp >= 0.8 && temp <= 1.2)
+		output[i] = 1;
+	else if (temp >= -1.2 && temp <= -0.8)
+		output[i] = -1;
+}
 
 
 /*
