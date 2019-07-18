@@ -57,6 +57,7 @@ void complexWrite(const char* title, float2* input, int width, const char* filen
 void realWrite(const char* title, float* input, int width, const char* filename);
 void errorHandle(int input);
 void phaseUnwrapping(float* wMatrix, float* result);
+void realWrite2(const char* title, float* input, int height, const char* filename);
 
 __global__ void vectorAdd(float* a, float* b, float* c, int numElements) {
 	int x = blockIdx.x;
@@ -271,7 +272,7 @@ __global__ void calOutputImage(cufftReal* input, float* output, int numElements)
 __global__ void DCTMatrix(float* matrixL, float* matrixR, int height, int width) {
 	int i = (blockIdx.x * blockDim.x + threadIdx.x) * (blockDim.y * gridDim.y) + (threadIdx.y + blockIdx.y * blockDim.y);
 	int x = blockDim.x * blockIdx.x + threadIdx.x;
-	int y = blockDim.y * blockDim.y + threadIdx.y;
+	int y = blockDim.y * blockIdx.y + threadIdx.y;
 	if (x < height && y < height) {
 		matrixL[i] = cos(y * pi * (2 * x + 1) / (2 * height));
 	}
@@ -281,7 +282,7 @@ __global__ void DCTMatrix(float* matrixL, float* matrixR, int height, int width)
 __global__ void IDCTMatrix(float* matrixL, float* matrixR, int height, int width) {
 	int i = (blockIdx.x * blockDim.x + threadIdx.x) * (blockDim.y * gridDim.y) + (threadIdx.y + blockIdx.y * blockDim.y);
 	int x = blockDim.x * blockIdx.x + threadIdx.x;
-	int y = blockDim.y * blockDim.y + threadIdx.y;
+	int y = blockDim.y * blockIdx.y + threadIdx.y;
 	if (x < height && y < height) {
 		float w1;
 		if (y == 0)
@@ -301,7 +302,7 @@ __global__ void IDCTMatrix(float* matrixL, float* matrixR, int height, int width
 __global__ void matrixModify(float* input, int height, int width) {
 	int i = (blockIdx.x * blockDim.x + threadIdx.x) * (blockDim.y * gridDim.y) + (threadIdx.y + blockIdx.y * blockDim.y);
 	int x = blockDim.x * blockIdx.x + threadIdx.x;
-	int y = blockDim.y * blockDim.y + threadIdx.y;
+	int y = blockDim.y * blockIdx.y + threadIdx.y;
 	input[i] = input[i] / (2 * (cos((float)x * pi/ width) + cos((float)y *pi / height) - 2));
 }
 
@@ -900,8 +901,25 @@ void phaseUnwrapping(float* wMatrix, float* result) {
 	realWrite("grad", tempOut, 960, "../Debug/grad.csv");
 
 	DCTMatrix << <gridSize, blockSize >> > (dev_matrixS, dev_matrixL, 960, 1280);
+	float* tempOut1 = new float[960 * 960];
+	if (cudaSuccess != cudaMemcpy(tempOut1, dev_matrixS, 960 * 960 * sizeof(float), cudaMemcpyDeviceToHost))
+		cout << "cuda memory cpy error2!" << endl;
+	realWrite2("grad", tempOut1, 960, "../Debug/matrixS.csv");
+	float* tempOut2 = new float[1280 * 1280];
+	if (cudaSuccess != cudaMemcpy(tempOut2, dev_matrixL, 1280 * 1280 * sizeof(float), cudaMemcpyDeviceToHost))
+		cout << "cuda memory cpy error2!" << endl;
+	realWrite("grad", tempOut2, 1280, "../Debug/matrixL.csv");
+
 	cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, 960, 1280, 960, &alpha, dev_matrixS, 960, dev_GradMatrix, 960, &beta, dev_temp1, 960);
+	if (cudaSuccess != cudaMemcpy(tempOut, dev_temp1, 1280 * 960 * sizeof(float), cudaMemcpyDeviceToHost))
+		cout << "cuda memory cpy error2!" << endl;
+	realWrite("grad", tempOut, 960, "../Debug/mulResult1.csv");
+
 	cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, 960, 1280, 1280, &alpha, dev_temp1, 960, dev_matrixL, 1280, &beta, dev_temp2, 960);
+	if (cudaSuccess != cudaMemcpy(tempOut, dev_temp2, 1280 * 960 * sizeof(float), cudaMemcpyDeviceToHost))
+		cout << "cuda memory cpy error2!" << endl;
+	realWrite("grad", tempOut, 960, "../Debug/mulResult2.csv");
+
 	matrixModify << <gridSize, blockSize >> > (dev_temp2, 960, 1280);
 	if (cudaSuccess != cudaMemcpy(tempOut, dev_temp2, 1280 * 960 * sizeof(float), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error2!" << endl;
@@ -913,6 +931,7 @@ void phaseUnwrapping(float* wMatrix, float* result) {
 
 	if (cudaSuccess != cudaMemcpy(result, dev_result, 1280 * 960 * sizeof(float), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error3!" << endl;
+	realWrite("grad", result, 960, "../Debug/phase_image2.csv");
 
 	if (cudaSuccess != cudaFree(dev_GradMatrix))
 		cout << "cude memory free error!" << endl;
@@ -960,6 +979,21 @@ void realWrite(const char* title, float* input, int height, const char* filename
 	outFile.precision(7);
 	for (int y = 0; y < height; y++) {
 		for (int x = 0; x < 1280; x++) {
+			outFile << input[x * height + y] << ",";
+		}
+		outFile << " " << endl;
+	}
+
+}
+
+void realWrite2(const char* title, float* input, int height, const char* filename) {
+
+	ofstream outFile;
+	outFile.open(filename);
+	outFile.setf(ios::fixed, ios::floatfield);
+	outFile.precision(7);
+	for (int y = 0; y < height; y++) {
+		for (int x = 0; x < 960; x++) {
 			outFile << input[x * height + y] << ",";
 		}
 		outFile << " " << endl;
