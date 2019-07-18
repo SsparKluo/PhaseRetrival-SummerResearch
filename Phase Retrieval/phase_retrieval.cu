@@ -17,7 +17,6 @@
 
 #define lambda 0.632
 #define pi 3.1415926
-#define TILE_WIDTH 16
 #define FORWARE1 1
 #define FORWARD2 0
 #define INVERSE 1
@@ -320,7 +319,7 @@ __device__ float wrap(float input) {
 __global__ void gradCal(float* input, float* output, int height, int width) {
 	int i = (blockIdx.x * blockDim.x + threadIdx.x) * (blockDim.y * gridDim.y) + (threadIdx.y + blockIdx.y * blockDim.y);
 	int x = blockDim.x * blockIdx.x + threadIdx.x;
-	int y = blockDim.y * blockDim.y + threadIdx.y;
+	int y = blockDim.y * blockIdx.y + threadIdx.y;
 	if (x == 0) {
 		if (y == 0) {
 			output[i] = wrap(input[i + height] - input[i]) + wrap(input[i + 1] - input[i]);
