@@ -11,7 +11,7 @@
 #include"myUnwrap.h"
 #include"matrix.h"
 #include<math.h>
-#include"cuBLAS.h"
+#include"cublas_v2.h"
 #include <device_functions.h>
 #include <cuda_runtime_api.h>
 
