@@ -303,7 +303,7 @@ __global__ void matrixModify(float* input, int height, int width) {
 	int i = (blockIdx.x * blockDim.x + threadIdx.x) * (blockDim.y * gridDim.y) + (threadIdx.y + blockIdx.y * blockDim.y);
 	int x = blockDim.x * blockIdx.x + threadIdx.x;
 	int y = blockDim.y * blockIdx.y + threadIdx.y;
-	if (x != 0 || y != 0);
+	if (x != 0 || y != 0)
 		input[i] = input[i] / (2 * (cos(x * pi/ width) + cos(y *pi / height) - 2));
 }
 
