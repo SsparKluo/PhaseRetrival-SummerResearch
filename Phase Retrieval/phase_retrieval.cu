@@ -274,9 +274,9 @@ __global__ void DCTMatrix(float* matrixL, float* matrixR, int height, int width)
 	int x = blockDim.x * blockIdx.x + threadIdx.x;
 	int y = blockDim.y * blockIdx.y + threadIdx.y;
 	if (x < height && y < height) {
-		matrixL[i] = cos(y * pi * (2 * x + 1) / (2 * height));
+		matrixL[x * height + y] = cos(x * pi * (2 * y + 1) / (2 * height));
 	}
-	matrixR[i] = cos(x * pi * (2 * y + 1) / (2 * width));
+	matrixR[i] = cos(y * pi * (2 * x + 1) / (2 * width));
 }
 
 __global__ void IDCTMatrix(float* matrixL, float* matrixR, int height, int width) {
@@ -285,18 +285,18 @@ __global__ void IDCTMatrix(float* matrixL, float* matrixR, int height, int width
 	int y = blockDim.y * blockIdx.y + threadIdx.y;
 	if (x < height && y < height) {
 		float w1;
-		if (y == 0)
-			w1 = 1 / 2;
+		if (x == 0)
+			w1 = 0.5;
 		else
 			w1 = 1;
-		matrixL[i] = w1 * cos(y * pi * (2 * x + 1) / (2 * height));
+		matrixL[x * height + y] = w1 * cos(x * pi * (2 * y + 1) / (2 * height));
 	}
 	float w2;
-	if (x == 0)
-		w2 = 1 / 2;
+	if (y == 0)
+		w2 =0.5;
 	else
 		w2 = 1;
-	matrixR[i] = w2 * cos(x * pi * (2 * y + 1) / (2 * width));
+	matrixR[i] = w2 * cos(y * pi * (2 * x + 1) / (2 * width));
 }
 
 __global__ void matrixModify(float* input, int height, int width) {
@@ -774,6 +774,7 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 		cout << "cude memory free error!" << endl;
 
 	float* phaseImage = (float*)malloc(sizeof(float) * imageSizeL);
+	float2* finalImage = (float2*)malloc(sizeof(float2) * imageSizeL);
 	
 	cufftReal* dev_phaseImage;
 	cufftComplex* dev_calibFilteredBaseband, * dev_finalImage;
@@ -789,6 +790,10 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 	vectorMatDivide << <gridSize, blockSizeL >> > (dev_testFilteredBaseband, dev_calibFilteredBaseband, dev_finalImage, calibImage->imagePixels);
 	if (cudaSuccess != cudaGetLastError())
 		printf("divide Error!\n");
+	if (cudaSuccess != cudaMemcpy(finalImage, dev_finalImage, imageSizeL * sizeof(float2), cudaMemcpyDeviceToHost))
+		cout << "cuda memory cpy error!" << endl;
+	complexWrite("phase image", finalImage, 960, "../Debug/final_image.csv");
+
 	phaseCalculate << <gridSize, blockSizeL >> > (dev_finalImage, dev_phaseImage, imageSizeL);
 	if (cudaSuccess != cudaGetLastError())
 		printf("phase calculate Error!\n");
@@ -863,7 +868,7 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 }
 
 void phaseUnwrapping(float* wMatrix, float* result) {
-	dim3 blockSize(32, 32, 1), gridSize(40, 30, 1);
+	dim3 blockSize(32, 32, 1), gridSize(40, 30, 1), gridSizeL(40,40,1);
 	int imageSize = 1280 * 960;
 	int width = 960;
 	int height = 1280;
@@ -872,7 +877,8 @@ void phaseUnwrapping(float* wMatrix, float* result) {
 	cublasCreate(&handle);
 	const float alpha = 1.0f;
 	const float beta = 0.0f;
-
+	const float alpha1 = 4.0f;
+	const float alpha2 = (float)(1 / (height * width));
 
 	float* tempOut = new float[imageSize];
 	float* dev_GradMatrix, * dev_matrixS, * dev_matrixL, * dev_temp1, * dev_temp2, * dev_unwrapC, * dev_result, * dev_wMatrix;
@@ -901,22 +907,22 @@ void phaseUnwrapping(float* wMatrix, float* result) {
 		cout << "cuda memory cpy error1!" << endl;
 	realWrite("grad", tempOut, 960, "../Debug/grad.csv");
 
-	DCTMatrix << <gridSize, blockSize >> > (dev_matrixS, dev_matrixL, 960, 1280);
+	DCTMatrix << <gridSizeL, blockSize >> > (dev_matrixS, dev_matrixL, 960, 1280);
 	float* tempOut1 = new float[960 * 960];
 	if (cudaSuccess != cudaMemcpy(tempOut1, dev_matrixS, 960 * 960 * sizeof(float), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error2!" << endl;
-	realWrite2("grad", tempOut1, 960, "../Debug/matrixS.csv");
+	realWrite2("grad", tempOut1, 960, "../Debug/DCTmatrixS.csv");
 	float* tempOut2 = new float[1280 * 1280];
 	if (cudaSuccess != cudaMemcpy(tempOut2, dev_matrixL, 1280 * 1280 * sizeof(float), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error2!" << endl;
-	realWrite("grad", tempOut2, 1280, "../Debug/matrixL.csv");
+	realWrite("grad", tempOut2, 1280, "../Debug/DCTmatrixL.csv");
 
 	cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, 960, 1280, 960, &alpha, dev_matrixS, 960, dev_GradMatrix, 960, &beta, dev_temp1, 960);
 	if (cudaSuccess != cudaMemcpy(tempOut, dev_temp1, 1280 * 960 * sizeof(float), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error2!" << endl;
 	realWrite("grad", tempOut, 960, "../Debug/mulResult1.csv");
 
-	cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, 960, 1280, 1280, &alpha, dev_temp1, 960, dev_matrixL, 1280, &beta, dev_temp2, 960);
+	cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, 960, 1280, 1280, &alpha1, dev_temp1, 960, dev_matrixL, 1280, &beta, dev_temp2, 960);
 	if (cudaSuccess != cudaMemcpy(tempOut, dev_temp2, 1280 * 960 * sizeof(float), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error2!" << endl;
 	realWrite("grad", tempOut, 960, "../Debug/mulResult2.csv");
@@ -926,9 +932,19 @@ void phaseUnwrapping(float* wMatrix, float* result) {
 		cout << "cuda memory cpy error2!" << endl;
 	realWrite("grad", tempOut, 960, "../Debug/modified.csv");
 
-	IDCTMatrix << <gridSize, blockSize >> > (dev_matrixS, dev_matrixL, 960, 1280);
+	IDCTMatrix << <gridSizeL, blockSize >> > (dev_matrixS, dev_matrixL, 960, 1280);
+	if (cudaSuccess != cudaMemcpy(tempOut1, dev_matrixS, 960 * 960 * sizeof(float), cudaMemcpyDeviceToHost))
+		cout << "cuda memory cpy error2!" << endl;
+	realWrite2("grad", tempOut1, 960, "../Debug/IDCTmatrixS.csv");
+	if (cudaSuccess != cudaMemcpy(tempOut2, dev_matrixL, 1280 * 1280 * sizeof(float), cudaMemcpyDeviceToHost))
+		cout << "cuda memory cpy error2!" << endl;
+	realWrite("grad", tempOut2, 1280, "../Debug/IDCTmatrixL.csv");
+
 	cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, 960, 1280, 960, &alpha, dev_matrixS, 960, dev_temp2, 960, &beta, dev_temp1, 960);
-	cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, 960, 1280, 1280, &alpha, dev_temp1, 960, dev_matrixL, 1280, &beta, dev_result, 960);
+	if (cudaSuccess != cudaMemcpy(tempOut, dev_temp1, 1280 * 960 * sizeof(float), cudaMemcpyDeviceToHost))
+		cout << "cuda memory cpy error2!" << endl;
+	realWrite("grad", tempOut, 960, "../Debug/mulResult3.csv");
+	cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, 960, 1280, 1280, &alpha2, dev_temp1, 960, dev_matrixL, 1280, &beta, dev_result, 960);
 
 	if (cudaSuccess != cudaMemcpy(result, dev_result, 1280 * 960 * sizeof(float), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error3!" << endl;
