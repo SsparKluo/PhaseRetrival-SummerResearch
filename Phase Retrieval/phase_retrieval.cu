@@ -85,13 +85,18 @@ __global__ void numMultipleForComplex(float2* a, float* b, float2* c, int numEle
 	}
 }
 
-__global__ void vectorMatDivide(float2* dividend, float2* divisor, float2* output, int numElements) {
+__global__ void complexDivide(float2* dividend, float2* divisor, float2* output, int numElements) {
 	int x = blockIdx.x;
 	int y = threadIdx.y;
 	int i = blockIdx.x * blockDim.y + threadIdx.y;
 	if (i < numElements) {
-		output[i].x = dividend[i].x / divisor[i].x;
-		output[i].y = dividend[i].y / divisor[i].y;
+		double temp;
+		temp = ((double)dividend[i].x * (double)divisor[i].x + (double)dividend[i].y * (double)divisor[i].y )
+			/ ((double)divisor[i].x* (double)divisor[i].x + (double)divisor[i].y * (double)divisor[i].y);
+		output[i].x = (float)temp;
+		temp = ((double)dividend[i].y * (double)divisor[i].x - (double)dividend[i].x * (double)divisor[i].y)
+			/ ((double)divisor[i].x * (double)divisor[i].x + (double)divisor[i].y * (double)divisor[i].y);
+		output[i].y = (float)temp;
 	}
 }
 
@@ -787,7 +792,7 @@ float* phaseRetrieval(image* calibImage, image* testImage) {
 	if (cudaSuccess != cudaMemcpy(dev_calibFilteredBaseband, calibImage->filteredBaseband, imageSizeL * sizeof(float2), cudaMemcpyHostToDevice))
 		cout << "cuda memory cpy error!" << endl;
 
-	vectorMatDivide << <gridSize, blockSizeL >> > (dev_testFilteredBaseband, dev_calibFilteredBaseband, dev_finalImage, calibImage->imagePixels);
+	complexDivide << <gridSize, blockSizeL >> > (dev_testFilteredBaseband, dev_calibFilteredBaseband, dev_finalImage, calibImage->imagePixels);
 	if (cudaSuccess != cudaGetLastError())
 		printf("divide Error!\n");
 	if (cudaSuccess != cudaMemcpy(finalImage, dev_finalImage, imageSizeL * sizeof(float2), cudaMemcpyDeviceToHost))
