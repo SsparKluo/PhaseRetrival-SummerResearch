@@ -289,14 +289,14 @@ __global__ void IDCTMatrix(float* matrixL, float* matrixR, int height, int width
 	int x = blockDim.x * blockIdx.x + threadIdx.x;
 	int y = blockDim.y * blockIdx.y + threadIdx.y;
 	if (x < height && y < height) {
-		float w = 1.0;
-		if (x == 0)
-			w = 0.5;
+		float w = 1 / sqrt((float)960);
+		if (x != 0)
+			w = w * sqrt(2.0f);
 		matrixL[x * height + y] = w * cos(x * pi * (2 * y + 1) / (2 * height));
 	}
-	float w = 1.0;
+	float w = 1 / sqrt((float)1280);
 	if (y == 0)
-		w = 0.5;
+		w = w * sqrt(2.0f);
 	matrixR[i] = w * cos(y * pi * (2 * x + 1) / (2 * width));
 }
 
@@ -306,6 +306,10 @@ __global__ void matrixModify(float* input, int height, int width) {
 	int y = blockDim.y * blockIdx.y + threadIdx.y;
 	if (x != 0 || y != 0)
 		input[i] = input[i] / (2 * (cos(x * pi/ width) + cos(y *pi / height) - 2));
+	if (x == 0)
+		input[i] = sqrt(2) * input[i];
+	if (y == 0)
+		input[i] = sqrt(2) * input[i];
 }
 
 __device__ float wrap(float input) {
@@ -881,8 +885,7 @@ void phaseUnwrapping(float* wMatrix, float* result) {
 	cublasCreate(&handle);
 	const float beta = 0.0f;
 	const float alpha0 = 1.0f;
-	const float alpha1 = 4.0f;
-	const float alpha2 = (float)(1 / (imageSize));
+	const float alpha1 =1 / sqrt(imageSize);
 
 	float* tempOut = new float[imageSize];
 	float* dev_GradMatrix, * dev_matrixS, * dev_matrixL, * dev_temp1, * dev_temp2, * dev_unwrapC, * dev_result, * dev_wMatrix;
@@ -948,7 +951,7 @@ void phaseUnwrapping(float* wMatrix, float* result) {
 	if (cudaSuccess != cudaMemcpy(tempOut, dev_temp1, 1280 * 960 * sizeof(float), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error2!" << endl;
 	realWrite("grad", tempOut, 960, "../Debug/mulResult3.csv");
-	cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, 960, 1280, 1280, &alpha2, dev_temp1, 960, dev_matrixL, 1280, &beta, dev_result, 960);
+	cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, 960, 1280, 1280, &alpha0, dev_temp1, 960, dev_matrixL, 1280, &beta, dev_result, 960);
 
 	if (cudaSuccess != cudaMemcpy(result, dev_result, 1280 * 960 * sizeof(float), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error3!" << endl;
