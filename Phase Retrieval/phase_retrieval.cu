@@ -314,12 +314,15 @@ __global__ void matrixModify(float* input, int height, int width) {
 
 __device__ float wrap(float input) {
 	float output;
-	if (input < -pi)
-		output = 2 * pi + input;
-	else if (input > pi)
-		output = input - 2 * pi;
-	else
-		output = input;
+	output = input;
+	while (output >= pi || output < -pi) {
+		if (input < -pi)
+			output = 2 * pi + input;
+		else if (input >= pi)
+			output = input - 2 * pi;
+		else
+			output = input;
+	}
 	return output;
 }
 
@@ -340,24 +343,24 @@ __global__ void gradCal(float* input, float* output, int height, int width) {
 	}
 	else if (x == width - 1) {
 		if (y == 0) {
-			output[i] = -wrap(input[i] - input[i - 1]) + wrap(input[i + 1] - input[i]);
+			output[i] = -wrap(input[i] - input[i - height]) + wrap(input[i + 1] - input[i]);
 		}
 		else if (y == height - 1) {
-			output[i] = -wrap(input[i] - input[i - 1]) - wrap(input[i] - input[i - 1]);
+			output[i] = -wrap(input[i] - input[i - height]) - wrap(input[i] - input[i - 1]);
 		}
 		else {
-			output[i] = -wrap(input[i] - input[i - 1]) + wrap(input[i + 1] - input[i]) - wrap(input[i] - input[i - 1]);
+			output[i] = -wrap(input[i] - input[i - height]) + wrap(input[i + 1] - input[i]) - wrap(input[i] - input[i - 1]);
 		}
 	}
 	else {
 		if (y == 0) {
-			output[i] = wrap(input[i + height] - input[i]) - wrap(input[i] - input[i - 1]) + wrap(input[i + 1] - input[i]);
+			output[i] = wrap(input[i + height] - input[i]) - wrap(input[i] - input[i - height]) + wrap(input[i + 1] - input[i]);
 		}
 		else if (y == height - 1) {
-			output[i] = wrap(input[i + height]) - wrap(input[i] - input[i - 1]) - wrap(input[i] - input[i - 1]);
+			output[i] = wrap(input[i + height]) - wrap(input[i] - input[i - height]) - wrap(input[i] - input[i - 1]);
 		}
 		else {
-			output[i] = wrap(input[i + height]) - wrap(input[i] - input[i - 1]) + wrap(input[i + 1] - input[i]) - wrap(input[i] - input[i - 1]);
+			output[i] = wrap(input[i + height]) - wrap(input[i] - input[i - height]) + wrap(input[i + 1] - input[i]) - wrap(input[i] - input[i - 1]);
 		}
 	}
 }
@@ -880,7 +883,6 @@ void phaseUnwrapping(float* wMatrix, float* result) {
 
 	cublasHandle_t handle;
 	cublasCreate(&handle);
-	const float alpha1 = 1.0f;
 	const float beta = 0.0f;
 	const float alpha1 = 4.0f;
 	const float alpha2 = (float)(1 / (height * width));
@@ -945,7 +947,7 @@ void phaseUnwrapping(float* wMatrix, float* result) {
 		cout << "cuda memory cpy error2!" << endl;
 	realWrite("grad", tempOut2, 1280, "../Debug/IDCTmatrixL.csv");
 
-	cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, 960, 1280, 960, &alpha, dev_matrixS, 960, dev_temp2, 960, &beta, dev_temp1, 960);
+	cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, 960, 1280, 960, &alpha1, dev_matrixS, 960, dev_temp2, 960, &beta, dev_temp1, 960);
 	if (cudaSuccess != cudaMemcpy(tempOut, dev_temp1, 1280 * 960 * sizeof(float), cudaMemcpyDeviceToHost))
 		cout << "cuda memory cpy error2!" << endl;
 	realWrite("grad", tempOut, 960, "../Debug/mulResult3.csv");
